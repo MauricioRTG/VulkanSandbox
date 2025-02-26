@@ -173,7 +173,7 @@ bool VKApplication::isDeviceSuitable(VkPhysicalDevice device)
 	//Other alternative is to rateDeviceSuitability with a score that increases based on the features we want selecting the best
 
 	//Select based on having the queue families tyes that we want
-	QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+	QueueFamilyIndices indices = findQueueFamilies(device);
 
 	return indices.isComplete();
 }
@@ -183,10 +183,10 @@ QueueFamilyIndices VKApplication::findQueueFamilies(VkPhysicalDevice device) con
 	QueueFamilyIndices indices;
 	//Assign index to queue families that could be found
 	uint32_t queueFamilyCount;
-	vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
+	vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
 
 	std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
-	vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilies.data());
+	vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
 
 	int i = 0;
 	for (const auto& queueFamily : queueFamilies){
