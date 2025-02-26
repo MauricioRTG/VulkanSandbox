@@ -3,6 +3,7 @@
 #include <iostream>
 #include <vulkan/vulkan.h>
 #include <vector>
+#include <optional>
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
@@ -21,6 +22,19 @@ const bool enableValidationLayers = false;
 #else
 const bool enableValidationLayers = true;
 #endif
+
+//Stores indices for different queue types
+struct QueueFamilyIndices {
+	/*
+	* std::optional is a wrapper that contains no value until you assign something to it. Allowing to distinguish between the case of a value existing or not with has_value()
+	* We use optional to indicating whether a particular queue family was found
+	*/
+	std::optional<uint32_t> graphicsFamily;
+
+	bool isComplete() const {
+		return graphicsFamily.has_value();
+	}
+};
 
 class VKApplication {
 public:
@@ -58,4 +72,6 @@ private:
 	void printInstanceExtensionSupport();
 
 	bool isDeviceSuitable(VkPhysicalDevice device);
+
+	QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;
 };

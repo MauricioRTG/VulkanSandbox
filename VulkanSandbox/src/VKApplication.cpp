@@ -161,11 +161,47 @@ void VKApplication::printInstanceExtensionSupport()
 
 bool VKApplication::isDeviceSuitable(VkPhysicalDevice device)
 {
+	/*Check for features and properties you want in your physical device
 	VkPhysicalDeviceProperties physicalDeviceProperties;
 	VkPhysicalDeviceFeatures physicalDeviceFeatures;
 	vkGetPhysicalDeviceProperties(device, &physicalDeviceProperties);
 	vkGetPhysicalDeviceFeatures(device, &physicalDeviceFeatures);
 
 	return physicalDeviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU &&
-		physicalDeviceFeatures.geometryShader;
+		physicalDeviceFeatures.geometryShader;*/
+
+	//Other alternative is to rateDeviceSuitability with a score that increases based on the features we want selecting the best
+
+	//Select based on having the queue families tyes that we want
+	QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+
+	return indices.isComplete();
+}
+
+QueueFamilyIndices VKApplication::findQueueFamilies(VkPhysicalDevice device) const
+{
+	QueueFamilyIndices indices;
+	//Assign index to queue families that could be found
+	uint32_t queueFamilyCount;
+	vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, nullptr);
+
+	std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+	vkGetPhysicalDeviceQueueFamilyProperties(physicalDevice, &queueFamilyCount, queueFamilies.data());
+
+	int i = 0;
+	for (const auto& queueFamily : queueFamilies){
+		//Masks 32 bits to using VK_QUEUE_GRAPHICS_BIT position and if after the result is 1 this means the queue family has graphics capabilities
+		if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT){
+			indices.graphicsFamily = i;
+		}
+
+		//Exit early if all required indices where found
+		if (indices.isComplete()) {
+			break;
+		}
+
+		i++;
+	}
+
+	return indices;
 }
