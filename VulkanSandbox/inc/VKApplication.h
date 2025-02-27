@@ -42,13 +42,20 @@ public:
 private:
 	class GLFWwindow* window;
 	
-	//Vulkan handles
+	/*  Vulkan handles */
 
 	//Vulkan on your system, we configure vulkan
 	VkInstance instance;
 
 	//Handle of hardware device (GPU)
 	VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
+
+	//Main interface to a physical device (active configuration for features we want to use from the physical device) 
+	VkDevice logicalDevice;
+
+	//Receive commands to be executed on physical device (queues are automatically created along with the logical device)
+	//We can use the vkGetDeviceQueue function to retrieve queue handles for each queue family. 
+	VkQueue graphicsQueue;
 
 	//Main funcitions for Run()
 	void initWindows();
@@ -64,6 +71,8 @@ private:
 	void createInstance();
 
 	void pickPhysicalDevice();
+
+	void createLogicalDevice();
 
 	//Helper functions
 	

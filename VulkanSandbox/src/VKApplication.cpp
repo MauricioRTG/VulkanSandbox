@@ -23,6 +23,8 @@ void VKApplication::initWindows() {
 
 void VKApplication::initVulkan() {
 	createInstance();
+	pickPhysicalDevice();
+	createLogicalDevice();
 }
 
 void VKApplication::mainLoop() {
@@ -33,6 +35,7 @@ void VKApplication::mainLoop() {
 }
 
 void VKApplication::cleanup() {
+	vkDestroyDevice(logicalDevice, nullptr);
 	vkDestroyInstance(instance, nullptr);
 
 	glfwDestroyWindow(window);
@@ -61,7 +64,7 @@ void VKApplication::createInstance(){
 	const char** glfwExtensions;
 	glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
 
-	//Tells vulkan dricer which global extensions and validation layers we want to use. Global means they apply to entire program not a specific device
+	//Tells vulkan driver which global extensions and validation layers we want to use. Global means they apply to entire program not a specific device
 	VkInstanceCreateInfo createInfo{};
 	createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
 	createInfo.pApplicationInfo = &appInfo;
@@ -85,8 +88,7 @@ void VKApplication::createInstance(){
 	//printInstanceExtensionSupport();
 }
 
-void VKApplication::pickPhysicalDevice()
-{
+void VKApplication::pickPhysicalDevice(){
 	//Quary the number of physical devices
 	uint32_t deviceCount;
 	vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
@@ -111,6 +113,61 @@ void VKApplication::pickPhysicalDevice()
 	if (physicalDevice == VK_NULL_HANDLE) {
 		throw std::runtime_error("failed to find a suitable GPU!");
 	}
+
+}
+
+void VKApplication::createLogicalDevice(){
+	/*
+	* The currently available drivers will only allow you to create a small number of queues for each queue family 
+	* and you don't really need more than one. That's because you can create all of the command buffers on multiple threads 
+	* and then submit them all at once on the main thread with a single low-overhead call.
+	*/
+
+	//find all the queue families of the physical device, we are only interested in creating queue with graphics capabilities
+	QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+
+	//Vulkan lets you assign priorities to queues to influence the scheduling of command buffer execution using floating point numbers between 0.0 and 1.0
+	float queuePriority = 1.0f;
+
+	//Describes the number of queues we want for a single queue family (in this case qwe create a sinlge queue with graphics capabilities)
+	VkDeviceQueueCreateInfo queueCreateInfo{};
+	queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+	queueCreateInfo.queueFamilyIndex = indices.graphicsFamily.value();
+	queueCreateInfo.queueCount = 1;
+	queueCreateInfo.pQueuePriorities = &queuePriority;
+
+	/*Specify the se of device feature that we'll be using. 
+	* These are the features that we can queried support for with vkGetPhysicalDeviceFeatures, like geometry shaders. 
+	* So from the available features from that physical device we select the ones we only want using this logical device (this way we can create multiple logical devices each with different features form the physical device)
+	*/
+
+	VkPhysicalDeviceFeatures deviceFeatures{}; //We leave everything to VK_FALSE
+
+	/* Creating the logical device */
+
+	//Here we add pointers to the queue creation info and device feature structs
+	VkDeviceCreateInfo createInfo{};
+	createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
+	createInfo.pQueueCreateInfos = &queueCreateInfo;
+	createInfo.queueCreateInfoCount = 1;
+	createInfo.pEnabledFeatures = &deviceFeatures;
+	//Specify extensions and validation layers (device specific)
+	createInfo.enabledExtensionCount = 0;
+	if (enableValidationLayers) {
+		createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
+		createInfo.ppEnabledLayerNames = validationLayers.data();
+	}
+	else {
+		createInfo.enabledLayerCount = 0;
+	}
+
+	//Intantiate logical device
+	if (vkCreateDevice(physicalDevice, &createInfo, nullptr, &logicalDevice) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create logical device!");
+	}
+
+	//Stores a handle to the graphics queue (created along with logical device)
+	vkGetDeviceQueue(logicalDevice, indices.graphicsFamily.value(), 0, &graphicsQueue);
 
 }
 
@@ -144,8 +201,7 @@ bool VKApplication::checkValidationLayerSupport(){
 	return true;
 }
 
-void VKApplication::printInstanceExtensionSupport()
-{
+void VKApplication::printInstanceExtensionSupport(){
 	uint32_t extensionCount = 0;
 	vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr);
 
@@ -159,8 +215,7 @@ void VKApplication::printInstanceExtensionSupport()
 	}
 }
 
-bool VKApplication::isDeviceSuitable(VkPhysicalDevice device)
-{
+bool VKApplication::isDeviceSuitable(VkPhysicalDevice device){
 	/*Check for features and properties you want in your physical device
 	VkPhysicalDeviceProperties physicalDeviceProperties;
 	VkPhysicalDeviceFeatures physicalDeviceFeatures;
@@ -178,8 +233,7 @@ bool VKApplication::isDeviceSuitable(VkPhysicalDevice device)
 	return indices.isComplete();
 }
 
-QueueFamilyIndices VKApplication::findQueueFamilies(VkPhysicalDevice device) const
-{
+QueueFamilyIndices VKApplication::findQueueFamilies(VkPhysicalDevice device) const {
 	QueueFamilyIndices indices;
 	//Assign index to queue families that could be found
 	uint32_t queueFamilyCount;
@@ -190,7 +244,7 @@ QueueFamilyIndices VKApplication::findQueueFamilies(VkPhysicalDevice device) con
 
 	int i = 0;
 	for (const auto& queueFamily : queueFamilies){
-		//Masks 32 bits to using VK_QUEUE_GRAPHICS_BIT position and if after the result is 1 this means the queue family has graphics capabilities
+		//Masks 32 bits, using VK_QUEUE_GRAPHICS_BIT position and if after the result is 1 this means the queue family has graphics capabilities
 		if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT){
 			indices.graphicsFamily = i;
 		}
