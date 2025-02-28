@@ -4,11 +4,16 @@
 #include <vulkan/vulkan.h>
 #include <vector>
 #include <optional>
+//For Surface
+#include <GLFW/glfw3.h>
+#include <GLFW/glfw3native.h>
 
 #define GLM_FORCE_RADIANS
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
+//For Surface
 #define GLFW_INCLUDE_VULKAN
-
+#define GLFW_EXPOSE_NATIVE_WIN32
+#define VK_USE_PLATFORM_WIN32_KHR
 
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
@@ -30,9 +35,10 @@ struct QueueFamilyIndices {
 	* We use optional to indicating whether a particular queue family was found
 	*/
 	std::optional<uint32_t> graphicsFamily;
+	std::optional<uint32_t> presentFamily;
 
 	bool isComplete() const {
-		return graphicsFamily.has_value();
+		return graphicsFamily.has_value() && presentFamily.has_value();
 	}
 };
 
@@ -57,6 +63,12 @@ private:
 	//We can use the vkGetDeviceQueue function to retrieve queue handles for each queue family. 
 	VkQueue graphicsQueue;
 
+	//Queue that supports presentation
+	VkQueue presentQueue;
+
+	//Window of you OS, we conect wulkan and the window system with a extension from glfw
+	VkSurfaceKHR surface;
+
 	//Main funcitions for Run()
 	void initWindows();
 
@@ -69,6 +81,8 @@ private:
 	//Functions for initVulkan
 
 	void createInstance();
+
+	void createSurface();
 
 	void pickPhysicalDevice();
 

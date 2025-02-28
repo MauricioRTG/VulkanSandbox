@@ -2,6 +2,7 @@
 #include <GLFW/glfw3.h>
 #include <glm/vec4.hpp>
 #include <glm/mat4x4.hpp>
+#include <set>
 
 void VKApplication::run() {
 	initWindows();
@@ -23,6 +24,7 @@ void VKApplication::initWindows() {
 
 void VKApplication::initVulkan() {
 	createInstance();
+	createSurface();
 	pickPhysicalDevice();
 	createLogicalDevice();
 }
@@ -36,6 +38,7 @@ void VKApplication::mainLoop() {
 
 void VKApplication::cleanup() {
 	vkDestroyDevice(logicalDevice, nullptr);
+	vkDestroySurfaceKHR(instance, surface, nullptr);
 	vkDestroyInstance(instance, nullptr);
 
 	glfwDestroyWindow(window);
@@ -45,8 +48,7 @@ void VKApplication::cleanup() {
 
 void VKApplication::createInstance(){
 	//Check for validation layer support
-	if (enableValidationLayers && !checkValidationLayerSupport())
-	{
+	if (enableValidationLayers && !checkValidationLayerSupport()){
 		throw std::runtime_error("Validation layers requested, but not available!");
 	}
 
@@ -88,13 +90,33 @@ void VKApplication::createInstance(){
 	//printInstanceExtensionSupport();
 }
 
+void VKApplication::createSurface(){
+	if (glfwCreateWindowSurface(instance, window, nullptr, &surface) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create window surface!");
+	}
+
+	/*This is a glfw helper function that does the next steps:
+	*
+	* 1.Creating a VkWin32SurfaceCreateInfoKHR and filling it
+	*
+	* VkWin32SurfaceCreateInfoKHR createInfo{};
+	* createInfo.sType = VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR;
+	* createInfo.hwnd = glfwGetWin32Window(window);
+	* createInfo.hinstance = GetModuleHandle(nullptr);
+
+	* 2. And then creating the WIN32 Surface
+	* if (vkCreateWin32SurfaceKHR(instance, &createInfo, nullptr, &surface) != VK_SUCCESS) {
+	* 	throw std::runtime_error("failed to create window surface!");
+	* }
+	*/
+}
+
 void VKApplication::pickPhysicalDevice(){
 	//Quary the number of physical devices
 	uint32_t deviceCount;
 	vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
 
-	if (deviceCount == 0)
-	{
+	if (deviceCount == 0){
 		throw std::runtime_error("Failed to find GPUs with Vulkan support!");
 	}
 
@@ -126,15 +148,24 @@ void VKApplication::createLogicalDevice(){
 	//find all the queue families of the physical device, we are only interested in creating queue with graphics capabilities
 	QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
 
+	//We need multiple VKDeviceQUeueCreateIngot stucts to create a queue form both families (graphics and presentation)
+	std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+	std::set<uint32_t> uniqueQueueFamilies = { indices.graphicsFamily.value(), indices.presentFamily.value() };
+
 	//Vulkan lets you assign priorities to queues to influence the scheduling of command buffer execution using floating point numbers between 0.0 and 1.0
 	float queuePriority = 1.0f;
-
-	//Describes the number of queues we want for a single queue family (in this case qwe create a sinlge queue with graphics capabilities)
-	VkDeviceQueueCreateInfo queueCreateInfo{};
-	queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-	queueCreateInfo.queueFamilyIndex = indices.graphicsFamily.value();
-	queueCreateInfo.queueCount = 1;
-	queueCreateInfo.pQueuePriorities = &queuePriority;
+	//For each queue family one that support presentation and/or graphics (one queue family can have both, or they are supported by different queue families indicated by the Queue indice)
+	for (uint32_t queueFamily : uniqueQueueFamilies)
+	{
+		//Describes the number of queues we want for a single queue family (in this case qwe create a sinlge queue with graphics capabilities)
+		VkDeviceQueueCreateInfo queueCreateInfo{};
+		queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+		queueCreateInfo.queueFamilyIndex = queueFamily;
+		queueCreateInfo.queueCount = 1;
+		queueCreateInfo.pQueuePriorities = &queuePriority;
+		queueCreateInfos.push_back(queueCreateInfo);
+	}
+	
 
 	/*Specify the se of device feature that we'll be using. 
 	* These are the features that we can queried support for with vkGetPhysicalDeviceFeatures, like geometry shaders. 
@@ -148,8 +179,8 @@ void VKApplication::createLogicalDevice(){
 	//Here we add pointers to the queue creation info and device feature structs
 	VkDeviceCreateInfo createInfo{};
 	createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
-	createInfo.pQueueCreateInfos = &queueCreateInfo;
-	createInfo.queueCreateInfoCount = 1;
+	createInfo.pQueueCreateInfos = queueCreateInfos.data();
+	createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
 	createInfo.pEnabledFeatures = &deviceFeatures;
 	//Specify extensions and validation layers (device specific)
 	createInfo.enabledExtensionCount = 0;
@@ -169,6 +200,8 @@ void VKApplication::createLogicalDevice(){
 	//Stores a handle to the graphics queue (created along with logical device)
 	vkGetDeviceQueue(logicalDevice, indices.graphicsFamily.value(), 0, &graphicsQueue);
 
+	//Stores a handle to the presentation queue (created along with logical device)
+	vkGetDeviceQueue(logicalDevice, indices.presentFamily.value(), 0, &presentQueue);
 }
 
 bool VKApplication::checkValidationLayerSupport(){
@@ -236,7 +269,7 @@ bool VKApplication::isDeviceSuitable(VkPhysicalDevice device){
 QueueFamilyIndices VKApplication::findQueueFamilies(VkPhysicalDevice device) const {
 	QueueFamilyIndices indices;
 	//Assign index to queue families that could be found
-	uint32_t queueFamilyCount;
+	uint32_t queueFamilyCount = 0;
 	vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
 
 	std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
@@ -247,6 +280,13 @@ QueueFamilyIndices VKApplication::findQueueFamilies(VkPhysicalDevice device) con
 		//Masks 32 bits, using VK_QUEUE_GRAPHICS_BIT position and if after the result is 1 this means the queue family has graphics capabilities
 		if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT){
 			indices.graphicsFamily = i;
+		}
+
+		VkBool32 presentSupport = false;
+		vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentSupport);
+
+		if (presentSupport) {
+			indices.presentFamily = i;
 		}
 
 		//Exit early if all required indices where found
