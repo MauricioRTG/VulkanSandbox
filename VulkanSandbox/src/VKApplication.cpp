@@ -183,7 +183,8 @@ void VKApplication::createLogicalDevice(){
 	createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size());
 	createInfo.pEnabledFeatures = &deviceFeatures;
 	//Specify extensions and validation layers (device specific)
-	createInfo.enabledExtensionCount = 0;
+	createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
+	createInfo.ppEnabledExtensionNames = deviceExtensions.data();
 	if (enableValidationLayers) {
 		createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
 		createInfo.ppEnabledLayerNames = validationLayers.data();
@@ -260,10 +261,18 @@ bool VKApplication::isDeviceSuitable(VkPhysicalDevice device){
 
 	//Other alternative is to rateDeviceSuitability with a score that increases based on the features we want selecting the best
 
-	//Select based on having the queue families tyes that we want
+	//Select based on having the queue families tyes that we want (that support Preentation and Graphics)
 	QueueFamilyIndices indices = findQueueFamilies(device);
 
-	return indices.isComplete();
+	bool extensionsSupported = checkDeviceExtensionSupport(device);
+	//Check for adequate swapChain support in surface with correct formats and presentation modes
+	bool swapChainAdequate = false;
+	if (extensionsSupported) {
+		SwapChainSupportDetails swapChainSupport = querySwapChainSupport(device);
+		swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
+	}
+
+	return indices.isComplete() && extensionsSupported && swapChainAdequate;
 }
 
 QueueFamilyIndices VKApplication::findQueueFamilies(VkPhysicalDevice device) const {
@@ -298,4 +307,51 @@ QueueFamilyIndices VKApplication::findQueueFamilies(VkPhysicalDevice device) con
 	}
 
 	return indices;
+}
+
+bool VKApplication::checkDeviceExtensionSupport(VkPhysicalDevice device)
+{
+	//Get available extensions
+	uint32_t extensionCount; 
+	vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
+
+	std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+	vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
+
+	std::set<std::string> requiredExtensions(deviceExtensions.begin(), deviceExtensions.end());
+
+	//Loop available extensions and remove them from requiredExtenisons if requiredExtensions is empty then it has all required extensions
+	for (const auto& extension : availableExtensions) {
+		requiredExtensions.erase(extension.extensionName);
+	}
+
+	return requiredExtensions.empty();
+}
+
+SwapChainSupportDetails VKApplication::querySwapChainSupport(VkPhysicalDevice device) const
+{
+	SwapChainSupportDetails details;
+
+	//Get Surface capabilities
+	vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &details.capabilities);
+
+	//Get Surface formats
+	uint32_t formatCount;
+	vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, nullptr);
+
+	if (formatCount != 0) {
+		details.formats.resize(formatCount);
+		vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &formatCount, details.formats.data());
+	}
+
+	//Get Surface Present Modes
+	uint32_t presentModeCount;
+	vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount, nullptr);
+
+	if (presentModeCount) {
+		details.presentModes.resize(presentModeCount);
+		vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount, details.presentModes.data());
+	}
+
+	return details;
 }
