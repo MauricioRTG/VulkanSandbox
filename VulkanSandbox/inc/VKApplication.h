@@ -111,9 +111,13 @@ private:
 	//SwapChain
 	bool checkDeviceExtensionSupport(VkPhysicalDevice device);
 
+	//Get surface supported capabilities, formats, and presnet modes
 	SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device) const;
 
+	//Choosing swap chain settings
 	VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats);
 
 	VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
+
+	VkExtent2D chooseSwapExtend(const VkSurfaceCapabilitiesKHR& capabilities);
 };

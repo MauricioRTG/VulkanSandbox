@@ -3,6 +3,7 @@
 #include <glm/vec4.hpp>
 #include <glm/mat4x4.hpp>
 #include <set>
+#include <algorithm>
 
 void VKApplication::run() {
 	initWindows();
@@ -388,4 +389,38 @@ VkPresentModeKHR VKApplication::chooseSwapPresentMode(const std::vector<VkPresen
 	* VK_PRESENT_MODE_FIFO_RELAXED_KHR: This mode only differs from the previous one if the application is late and the queue was empty at the last vertical blank. Instead of waiting for the next vertical blank, the image is transferred right away when it finally arrives. This may result in visible tearing.
 	* VK_PRESENT_MODE_MAILBOX_KHR(avoids tearing and provides low letancy, but has energy cost becasue of discard): This is another variation of the second mode that waits for the vertical blank (vertical sync signal). Instead of blocking the application when the queue is full, the image that is already in the single-queue are simply replaced with the newer one. This mode can be used to render frames as fast as possible while still avoiding tearing, resulting in fewer latency issues than standard vertical sync. This is commonly known as "triple buffering", although the existence of three buffers alone does not necessarily mean that the framerate is unlocked.
 	*/
+}
+
+VkExtent2D VKApplication::chooseSwapExtend(const VkSurfaceCapabilitiesKHR& capabilities)
+{
+	//Check if Vulkan has already specified a fixed extent (resolution)
+	//if 'curentExtent.width' is not 'std::numeric_limits<uint32_t>::max()', it means Vulkan has already set the resolution for us,
+	//and we should use the value directly
+	//'std::numeric_limits<uint32_t>::max()' returns the maximum possible value that can be stored in a uint32_t (which is an unsigned 32-bit integer).
+	if (capabilities.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
+		return capabilities.currentExtent;
+	}
+	else {
+		//If vulkan gives us a max uint32_t as the width, it means we are allowd to pick our resolution
+
+		int width, height;
+
+		//Query the actual framebuffer size from GLFW
+		//GLFW window sizes are in screen coorinates, but Vulkan requires the swap chain in pixels
+		//This funcion retrives the size in pixels, accounting for high-DPI displays (like Apple's Retina display)
+		glfwGetFramebufferSize(window, &width, &height);
+
+		//Create a VkExtent2D struct and set its width & height based on the framebuffer size
+		VkExtent2D actualExtent = {
+			static_cast<uint32_t>(width),
+			static_cast<uint32_t>(height)
+		};
+		
+		//Clamp the width and height so they stay within Vulkan's allowed min/max image extent range
+		//This ensures that we do not select a resolution that is unsupported
+		actualExtent.width = std::clamp(actualExtent.width, capabilities.minImageExtent.width, capabilities.maxImageExtent.width);
+		actualExtent.height = std::clamp(actualExtent.height, capabilities.minImageExtent.height, capabilities.maxImageExtent.height);
+
+		return actualExtent;
+	}
 }
