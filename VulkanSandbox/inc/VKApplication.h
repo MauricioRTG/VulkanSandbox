@@ -113,4 +113,7 @@ private:
 
 	SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device) const;
 
+	VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats);
+
+	VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
 };
