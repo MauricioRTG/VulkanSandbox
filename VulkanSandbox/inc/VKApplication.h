@@ -82,6 +82,11 @@ private:
 	//Send image (presents) to a monitor, provides image to render into
 	VkSwapchainKHR swapChain;
 
+	//Images from swap chain
+	std::vector<VkImage> swapChainImages;
+	VkFormat swapChainImageFormat;
+	VkExtent2D swapChainExtent;
+
 	//Main funcitions for Run()
 	void initWindows();
 

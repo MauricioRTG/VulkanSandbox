@@ -267,6 +267,15 @@ void VKApplication::createSwapChain(){
 	if (vkCreateSwapchainKHR(logicalDevice, &createInfo, nullptr, &swapChain) != VK_SUCCESS) {
 		throw std::runtime_error("Failed to create swap chain!");
 	}
+
+	//Get swap chain images
+	vkGetSwapchainImagesKHR(logicalDevice, swapChain, &imageCount, nullptr);
+	swapChainImages.resize(imageCount);
+	vkGetSwapchainImagesKHR(logicalDevice, swapChain, &imageCount, swapChainImages.data());
+
+	//Get images format and extent
+	swapChainImageFormat = surfaceFormat.format;
+	swapChainExtent = extent;
 }
 
 bool VKApplication::checkValidationLayerSupport(){
