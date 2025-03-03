@@ -87,6 +87,9 @@ private:
 	VkFormat swapChainImageFormat;
 	VkExtent2D swapChainExtent;
 
+	//Image views: describes how to access the image and which part of the image to access, this ares used by the render pipline to access the images
+	std::vector<VkImageView> swapChainImageViews;
+
 	//Main funcitions for Run()
 	void initWindows();
 
@@ -107,6 +110,8 @@ private:
 	void createLogicalDevice();
 
 	void createSwapChain();
+
+	void createImageViews();
 
 	//Helper functions
 	
