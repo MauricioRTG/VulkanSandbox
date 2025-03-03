@@ -79,6 +79,9 @@ private:
 	//Window of you OS, we conect wulkan and the window system with a extension from glfw
 	VkSurfaceKHR surface;
 
+	//Send image (presents) to a monitor, provides image to render into
+	VkSwapchainKHR swapChain;
+
 	//Main funcitions for Run()
 	void initWindows();
 
@@ -97,6 +100,8 @@ private:
 	void pickPhysicalDevice();
 
 	void createLogicalDevice();
+
+	void createSwapChain();
 
 	//Helper functions
 	
@@ -119,5 +124,5 @@ private:
 
 	VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
 
-	VkExtent2D chooseSwapExtend(const VkSurfaceCapabilitiesKHR& capabilities);
+	VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities);
 };

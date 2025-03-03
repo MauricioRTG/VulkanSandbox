@@ -28,6 +28,7 @@ void VKApplication::initVulkan() {
 	createSurface();
 	pickPhysicalDevice();
 	createLogicalDevice();
+	createSwapChain();
 }
 
 void VKApplication::mainLoop() {
@@ -38,6 +39,7 @@ void VKApplication::mainLoop() {
 }
 
 void VKApplication::cleanup() {
+	vkDestroySwapchainKHR(logicalDevice, swapChain, nullptr);
 	vkDestroyDevice(logicalDevice, nullptr);
 	vkDestroySurfaceKHR(instance, surface, nullptr);
 	vkDestroyInstance(instance, nullptr);
@@ -206,6 +208,67 @@ void VKApplication::createLogicalDevice(){
 	vkGetDeviceQueue(logicalDevice, indices.presentFamily.value(), 0, &presentQueue);
 }
 
+void VKApplication::createSwapChain(){
+	//Get physical device surface available supported capabilities, formats and present modes
+	SwapChainSupportDetails swapChainSupport = querySwapChainSupport(physicalDevice);
+
+	//From the available formats, present modes and capanilities choose the ones we want based on the physical device
+	VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapChainSupport.formats);
+	VkPresentModeKHR presentMode = chooseSwapPresentMode(swapChainSupport.presentModes);
+	VkExtent2D extent = chooseSwapExtent(swapChainSupport.capabilities);
+
+	uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
+
+	//We should also make sure to not exceed the maximum number of images, also 0 in maxImageCount is a special value that means that there is no maximum
+	if (swapChainSupport.capabilities.maxImageCount > 0 && imageCount > swapChainSupport.capabilities.maxImageCount) {
+		imageCount = swapChainSupport.capabilities.maxImageCount;
+	}
+
+	//Swapchain create info
+	VkSwapchainCreateInfoKHR createInfo{};
+	createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+	createInfo.surface = surface;
+	createInfo.minImageCount = imageCount;
+	createInfo.imageFormat = surfaceFormat.format;
+	createInfo.imageColorSpace = surfaceFormat.colorSpace;
+	createInfo.imageExtent = extent;
+	createInfo.imageArrayLayers = 1; //Amount of layers each image consists of, is 1 unless you are developing a steroscopic 3D application
+	//specifies what kind of operations we'll use the images in the swap chain for. In this case we're going to render directly to them, which means that they're used as color attachment. It is also possible that you'll render images to a separate image first to perform operations like post-processing. In that case you may use a value like VK_IMAGE_USAGE_TRANSFER_DST_BIT instead and use a memory operation to transfer the rendered image to a swap chain image.
+	createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+	//Specify how to handle swap chain images that will be used across multiple queue families
+	//That will be the case in our applicaiton if the graphics queue family is different from the presentation queue
+	//We'll be drawing on the images in the swap chain from the graphics queue and then submitting them on the presentation queue.
+	QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+	uint32_t queueFamilyIndices[] = { indices.graphicsFamily.value(), indices.presentFamily.value() };
+
+	//If the graphics queue family id different fromt eh presentation queue family
+	if (indices.graphicsFamily != indices.presentFamily){
+		createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT; // Images can be used across multiple queue families without explicit ownership transfers.
+		createInfo.queueFamilyIndexCount = 2;
+		createInfo.pQueueFamilyIndices = queueFamilyIndices;
+	}
+	else {
+		createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE; //An image is owned by one queue family at a time and ownership must be explicitly transferred before using it in another queue family. This option offers the best performance.
+		createInfo.queueFamilyIndexCount = 0; //optional
+		createInfo.pQueueFamilyIndices = nullptr;
+	}
+
+	//We can specify that a certain transform should be applied to images in the swap chain if it is supported (supportedTransforms in capabilities), like a 90 degree clockwise rotation or horizontal flip. To specify that you do not want any transformation, simply specify the current transformation.
+	createInfo.preTransform = swapChainSupport.capabilities.currentTransform;
+
+	//The compositeAlpha field specifies if the alpha channel should be used for blending with other windows in the window system. You'll almost always want to simply ignore the alpha channel, hence VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR.
+	createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+	createInfo.presentMode = presentMode;
+	createInfo.clipped = VK_TRUE; //If the clipped member is set to VK_TRUE then that means that we don't care about the color of pixels that are obscured, for example because another window is in front of them. Unless you really need to be able to read these pixels back and get predictable results, you'll get the best performance by enabling clipping.
+	createInfo.oldSwapchain = VK_NULL_HANDLE; //With Vulkan it's possible that your swap chain becomes invalid or unoptimized while your application is running, for example because the window was resized. In that case the swap chain actually needs to be recreated from scratch and a reference to the old one must be specified in this field. For now we assume that we'll only ever create onw swap chaim
+
+	//Create Swapchain 
+	if (vkCreateSwapchainKHR(logicalDevice, &createInfo, nullptr, &swapChain) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create swap chain!");
+	}
+}
+
 bool VKApplication::checkValidationLayerSupport(){
 	uint32_t layerCount; 
 	vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
@@ -310,8 +373,7 @@ QueueFamilyIndices VKApplication::findQueueFamilies(VkPhysicalDevice device) con
 	return indices;
 }
 
-bool VKApplication::checkDeviceExtensionSupport(VkPhysicalDevice device)
-{
+bool VKApplication::checkDeviceExtensionSupport(VkPhysicalDevice device){
 	//Get available extensions
 	uint32_t extensionCount; 
 	vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
@@ -329,8 +391,7 @@ bool VKApplication::checkDeviceExtensionSupport(VkPhysicalDevice device)
 	return requiredExtensions.empty();
 }
 
-SwapChainSupportDetails VKApplication::querySwapChainSupport(VkPhysicalDevice device) const
-{
+SwapChainSupportDetails VKApplication::querySwapChainSupport(VkPhysicalDevice device) const{
 	SwapChainSupportDetails details;
 
 	//Get Surface capabilities
@@ -357,8 +418,7 @@ SwapChainSupportDetails VKApplication::querySwapChainSupport(VkPhysicalDevice de
 	return details;
 }
 
-VkSurfaceFormatKHR VKApplication::chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats)
-{
+VkSurfaceFormatKHR VKApplication::chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats){
 	//VK_FORMAT_B8G8R8A8_SRGB means that we store the B, G, R and alpha channels in that order with an 8 bit unsigned integer
 	//for a total of 32 bits per pixel. The colorSpace member indicates if the SRGB color space is supported or not using the VK_COLOR_SPACE_SRGB_NONLINEAR_KHR flag
 	for (const auto& availableFormat : availableFormats) {
@@ -371,8 +431,7 @@ VkSurfaceFormatKHR VKApplication::chooseSwapSurfaceFormat(const std::vector<VkSu
 	return availableFormats[0];
 }
 
-VkPresentModeKHR VKApplication::chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes)
-{
+VkPresentModeKHR VKApplication::chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes){
 	//VK_PRESENT_MODE_MAILBOX_KHR is a very nice trade-off if energy usage is not a concern. It allows us to avoid tearing 
 	// while still maintaining a fairly low latency by rendering new images that are as up-to-date as possible right until the vertical blank. 
 	// On mobile devices, where energy usage is more important, you will probably want to use VK_PRESENT_MODE_FIFO_KHR instead.
@@ -391,8 +450,7 @@ VkPresentModeKHR VKApplication::chooseSwapPresentMode(const std::vector<VkPresen
 	*/
 }
 
-VkExtent2D VKApplication::chooseSwapExtend(const VkSurfaceCapabilitiesKHR& capabilities)
-{
+VkExtent2D VKApplication::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities){
 	//Check if Vulkan has already specified a fixed extent (resolution)
 	//if 'curentExtent.width' is not 'std::numeric_limits<uint32_t>::max()', it means Vulkan has already set the resolution for us,
 	//and we should use the value directly
