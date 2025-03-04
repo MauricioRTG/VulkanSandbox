@@ -113,6 +113,8 @@ private:
 
 	void createImageViews();
 
+	void createGraphicsPipeline();
+
 	//Helper functions
 	
 	bool checkValidationLayerSupport();
@@ -135,4 +137,13 @@ private:
 	VkPresentModeKHR chooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);
 
 	VkExtent2D chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capabilities);
+
+	//Shader modules
+
+	//To create the SPIR-V bytcode files the command is glslc shader.vert -o vert.spv glslc shader.frag -o frag.spv
+
+	//The readFile function will read all of the bytes from the specified file and return them in a byte array managed by std::vector (for the SPIR-V file)
+	static std::vector<char> readFile(const std::string& filename);
+
+	VkShaderModule createShaderModule(const std::vector<char>& code) const;
 };

@@ -4,6 +4,7 @@
 #include <glm/mat4x4.hpp>
 #include <set>
 #include <algorithm>
+#include <fstream>
 
 void VKApplication::run() {
 	initWindows();
@@ -29,6 +30,7 @@ void VKApplication::initVulkan() {
 	pickPhysicalDevice();
 	createLogicalDevice();
 	createSwapChain();
+	createGraphicsPipeline();
 }
 
 void VKApplication::mainLoop() {
@@ -316,6 +318,38 @@ void VKApplication::createImageViews()
 	}
 }
 
+void VKApplication::createGraphicsPipeline(){
+	//Read shader SPIR-V Files
+	auto vertShaderCode = readFile("VulkanSandbox/shaders/vert.spv");
+	auto fragShaderCode = readFile("VulkanSandbox/shaders/frag.spv");
+
+	//Create Shader modules
+	VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
+	VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
+
+	//Shader stage creation
+
+	//Vertex shader stage
+	VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+	vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	vertShaderStageInfo.module = vertShaderModule;
+	vertShaderStageInfo.pName = "main"; //Entypoint of shader
+
+	//Fragment shader stage
+	VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+	fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	fragShaderStageInfo.module = fragShaderModule;
+	fragShaderStageInfo.pName = "main";
+
+	VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
+
+	//Destroy shader modules
+	vkDestroyShaderModule(logicalDevice, fragShaderModule, nullptr);
+	vkDestroyShaderModule(logicalDevice, vertShaderModule, nullptr);
+}
+
 bool VKApplication::checkValidationLayerSupport(){
 	uint32_t layerCount; 
 	vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
@@ -528,4 +562,42 @@ VkExtent2D VKApplication::chooseSwapExtent(const VkSurfaceCapabilitiesKHR& capab
 
 		return actualExtent;
 	}
+}
+
+std::vector<char> VKApplication::readFile(const std::string& filename){
+	//ate: Start reading at end of the file (so that we can use the read postion to deremine the size of the file). Opens the file and moves the read position to the end immediately
+	//binary: read the file as a binary file (avoid text transformation)
+
+	std::ifstream file(filename, std::ios::ate | std::ios::binary);
+	if (!file.is_open()) {
+		throw std::runtime_error("Failed to open file!");
+	}
+
+	//Initialize buffer with the size of the file
+	size_t fileSize = (size_t) file.tellg();//Return the current postion of the read pointer which is at the end of the file
+	std::vector<char> buffer(fileSize);
+	
+	//Seek back to the beginning of the file and read all of the bytes at once:
+	file.seekg(0); //Moves the read position back to the beginning of the file.
+	file.read(buffer.data(), fileSize);// Reads fileSize bytes into the buffer.
+	file.close();
+
+	return buffer;
+}
+
+VkShaderModule VKApplication::createShaderModule(const std::vector<char>& code) const
+{
+	//Struct that provide info for creating shader module
+	VkShaderModuleCreateInfo createInfo{};
+	createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	createInfo.codeSize = code.size();
+	createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data()); //reinterpret_cast<const uint32_t*> is used to reinterpret std::vector<char> data as uint32_t* because Vulkan expects the shader in 32-bit words (fixed-size unit of data SPIR-V defines a word as 32 bits (4 bytes)).
+
+	//Create Shader Module
+	VkShaderModule shaderModule;
+	if (vkCreateShaderModule(logicalDevice, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create shader module!");
+	}
+
+	return shaderModule;
 }
