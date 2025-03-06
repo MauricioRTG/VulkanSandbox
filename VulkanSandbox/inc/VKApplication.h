@@ -90,6 +90,9 @@ private:
 	//Image views: describes how to access the image and which part of the image to access, this ares used by the render pipline to access the images
 	std::vector<VkImageView> swapChainImageViews;
 
+	//Pipeline layout
+	VkPipelineLayout pipelineLayout;
+
 	//Main funcitions for Run()
 	void initWindows();
 

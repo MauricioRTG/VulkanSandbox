@@ -41,11 +41,16 @@ void VKApplication::mainLoop() {
 }
 
 void VKApplication::cleanup() {
+
+	vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
+
 	for (auto imageView : swapChainImageViews){
 		vkDestroyImageView(logicalDevice, imageView, nullptr);
 	}
+
 	vkDestroySwapchainKHR(logicalDevice, swapChain, nullptr);
 	vkDestroyDevice(logicalDevice, nullptr);
+
 	vkDestroySurfaceKHR(instance, surface, nullptr);
 	vkDestroyInstance(instance, nullptr);
 
@@ -344,6 +349,152 @@ void VKApplication::createGraphicsPipeline(){
 	fragShaderStageInfo.pName = "main";
 
 	VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
+
+	//Vertex Input
+	//Describes the format of the vertex data that will be passed to the vertex shader
+	VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
+	vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+	vertexInputInfo.vertexBindingDescriptionCount = 0;
+	vertexInputInfo.pVertexBindingDescriptions = nullptr;
+	vertexInputInfo.vertexAttributeDescriptionCount = 0;
+	vertexInputInfo.pVertexAttributeDescriptions = nullptr;
+
+	//Input Assembly
+	//Describes what kind o feometry will be drawn form the vertices (points, lines, or triangles), and the topology type
+	//VK_PRIMITIVE_TOPOLOGY_POINT_LIST: points from vertices
+	//VK_PRIMITIVE_TOPOLOGY_LINE_LIST: line from every 2 vertices without reuse
+	//VK_PRIMITIVE_TOPOLOGY_LINE_STRIP : the end vertex of every line is used as start vertex for the next line
+	//VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST : triangle from every 3 vertices without reuse
+	//VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP : the second and third vertex of every triangle are used as first two vertices of the next triangle
+
+	VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
+	inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+	inputAssembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	inputAssembly.primitiveRestartEnable = VK_FALSE; //If you set the primitiveRestartEnable member to VK_TRUE, then it's possible to break up lines and triangles in the _STRIP topology modes by using a special index of 0xFFFF or 0xFFFFFFFF in the vertex buffer.
+
+	//Viewports and Sissors
+	//Viewports (transformation) define the transformation from the image to the framebuffer
+	//Sissor (filter) rectangles define in which regions pixels will actually be stored, any pixels outside the siccor rectangles will be discarded by rasterizer
+	
+	//Scissor that covers entire framebuffer (only needed to specify when we don use dynamic states)
+	//VkRect2D scissor{};
+	//scissor.offset = { 0, 0 };
+	//scissor.extent = swapChainExtent;
+
+	//Enable Dynamic states for scissor and viewport
+	//Viewport(s) and scissor rectangle(s) can either be specified as a static part of the pipeline or as a dynamic state set in the command buffer. 
+	
+	//Viewport
+	VkPipelineViewportStateCreateInfo viewportState{};
+	viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+	viewportState.viewportCount = 1;
+	viewportState.scissorCount = 1;
+
+	//Rasterizer
+	//Takes the geometry that is shaped by hte vertices from the vertex shader and turns it into fragments
+	VkPipelineRasterizationStateCreateInfo rasterizer{};
+	rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+	rasterizer.depthClampEnable = VK_FALSE; //If depthClampEnable is set to VK_TRUE, then fragments that are beyond the near and far planes are clamped to them as opposed to discarding them. This is useful in some special cases like shadow maps.
+	rasterizer.rasterizerDiscardEnable = VK_FALSE; //If rasterizerDiscardEnable is set to VK_TRUE, then geometry never passes through the rasterizer stage. This basically disables any output to the framebuffer.
+	rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+	//The polygonMode determines how fragments are generated for geometry. The following modes are available:
+	//VK_POLYGON_MODE_FILL: fill the area of the polygon with fragments
+	//VK_POLYGON_MODE_LINE : polygon edges are drawn as lines
+	//VK_POLYGON_MODE_POINT : polygon vertices are drawn as points
+	rasterizer.lineWidth = 1.0f;//escribes the thickness of lines in terms of number of fragments. The maximum line width that is supported depends on the hardware and any line thicker than 1.0f requires you to enable the wideLines GPU feature.
+	rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;// The cullMode variable determines the type of face culling to use. You can disable culling, cull the front faces, cull the back faces or both.
+	rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;// The frontFace variable specifies the vertex order for faces to be considered front-facing and can be clockwise or counterclockwise.
+	rasterizer.depthBiasEnable = VK_FALSE;
+	//The rasterizer can alter the depth values by adding a constant value or biasing them based on a fragment's slope. 
+	rasterizer.depthBiasConstantFactor = 0.0f; // Optional
+	rasterizer.depthBiasClamp = 0.0f; // Optional
+	rasterizer.depthBiasSlopeFactor = 0.0f; // Optional
+
+	//Multisampling
+	//One of the ways to perform anti-aliasing. It works by combining the fragment shader results of multiple polygons that rasterize to the same pixel. This mainly occurs along edges, which is also where the most noticeable aliasing artifacts occur.
+	VkPipelineMultisampleStateCreateInfo multisampling{};
+	multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+	multisampling.sampleShadingEnable = VK_FALSE;
+	multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+	multisampling.minSampleShading = 1.0f; // Optional
+	multisampling.pSampleMask = nullptr; // Optional
+	multisampling.alphaToCoverageEnable = VK_FALSE; // Optional
+	multisampling.alphaToOneEnable = VK_FALSE; // Optional
+
+	//Color blending
+	//After a fragment shader has returned a color, it needs to be combined with the color that is already in the framebuffer. This transformation is known as color blending and there are two ways to do it:
+	//		Mix the old and new value to produce a final color
+	//		Combine the old and new value using a bitwise operation
+
+	//Color blend attachment: contains the configuration per attached framebuffer and the second
+
+	VkPipelineColorBlendAttachmentState colorBlendAttachment{};
+	colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+	colorBlendAttachment.blendEnable = VK_FALSE;
+	colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+	colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+	colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
+	colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+	colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+	colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
+
+	//Pseudocode that represent how previous struct uses the paramenters to calculate the blend
+	/*if (blendEnable) {
+		finalColor.rgb = (srcColorBlendFactor * newColor.rgb) < colorBlendOp > (dstColorBlendFactor * oldColor.rgb);
+		finalColor.a = (srcAlphaBlendFactor * newColor.a) < alphaBlendOp > (dstAlphaBlendFactor * oldColor.a);
+	}
+	else {
+		finalColor = newColor;
+	}
+
+	finalColor = finalColor & colorWriteMask;
+	
+	//The parameters we passed are using alpha blending, where we want the new color to be blended with the old color based on opacity
+
+	finalColor.rgb = newAlpha * newColor + (1 - newAlpha) * oldColor;
+	finalColor.a = newAlpha.a;
+	*/
+
+	//Color blending State: contains the global color blending settings. In our case we only have one framebuffer
+
+	VkPipelineColorBlendStateCreateInfo colorBlending{};
+	colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+	colorBlending.logicOpEnable = VK_FALSE; //If you want to use the second method of blending (bitwise combination), then you should set logicOpEnable to VK_TRUE
+	colorBlending.logicOp = VK_LOGIC_OP_COPY; // The bitwise operation can then be specified in the logicOp field. Note that this will automatically disable the first method, as if you had set blendEnable to VK_FALSE
+	colorBlending.attachmentCount = 1;
+	colorBlending.pAttachments = &colorBlendAttachment;
+	//Source and destination values are combined according to the blend operation, quadruplets of source and destination weighting factors determined by the blend factors, and a blend constant, to obtain a new set of R, G, B, and A values
+	colorBlending.blendConstants[0] = 0.0f; // Optional Rc
+	colorBlending.blendConstants[1] = 0.0f; // Optional Gc
+	colorBlending.blendConstants[2] = 0.0f; // Optional Bc
+	colorBlending.blendConstants[3] = 0.0f; // Optional Ac
+
+	//Dynamic States: scissor and viewport
+	//While most of the pipeline state needs to be baked into the pipeline state, a limited amount of the state can actually be changed without recreating the pipeline at draw time
+	std::vector<VkDynamicState> dynamicStates = {
+		VK_DYNAMIC_STATE_VIEWPORT,
+		VK_DYNAMIC_STATE_SCISSOR
+	};
+
+	VkPipelineDynamicStateCreateInfo dynamicState{};
+	dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+	dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
+	dynamicState.pDynamicStates = dynamicStates.data();
+
+	//Pipeline Layout creation
+	VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
+	pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	//Descriptor sets are used to bind resources(textures, buffers, etc.) to shaders
+	pipelineLayoutInfo.setLayoutCount = 0; //means that no descriptor sets are used in this pipeline. 
+	pipelineLayoutInfo.pSetLayouts = nullptr;// means there's no descriptor set layout.
+	//Push constants are small amounts of data that can be passed directly to shaders.
+	pipelineLayoutInfo.pushConstantRangeCount = 0; //no push constants are used
+	pipelineLayoutInfo.pPushConstantRanges = nullptr;
+
+	if (vkCreatePipelineLayout(logicalDevice, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS)
+	{
+		throw std::runtime_error("Failed to createpipeline layout!");
+	}
 
 	//Destroy shader modules
 	vkDestroyShaderModule(logicalDevice, fragShaderModule, nullptr);
