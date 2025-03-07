@@ -90,6 +90,9 @@ private:
 	//Image views: describes how to access the image and which part of the image to access, this ares used by the render pipline to access the images
 	std::vector<VkImageView> swapChainImageViews;
 
+	//Render pass: Specifies how many color and depth buffers there will be, how many samples to use for each of them and how their contents should be handled throughout the rendering operations. 
+	VkRenderPass renderPass;
+
 	//Pipeline layout
 	VkPipelineLayout pipelineLayout;
 
@@ -115,6 +118,8 @@ private:
 	void createSwapChain();
 
 	void createImageViews();
+ 
+	void createRenderPass();
 
 	void createGraphicsPipeline();
 

@@ -21,7 +21,6 @@ void VKApplication::initWindows() {
 	//Disable handling resized windows
 	glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
 	window = glfwCreateWindow(WIDTH, HEIGHT, "VulkanSandbox Window", nullptr, nullptr);
-
 }
 
 void VKApplication::initVulkan() {
@@ -30,6 +29,8 @@ void VKApplication::initVulkan() {
 	pickPhysicalDevice();
 	createLogicalDevice();
 	createSwapChain();
+	createImageViews();
+	createRenderPass();
 	createGraphicsPipeline();
 }
 
@@ -41,8 +42,8 @@ void VKApplication::mainLoop() {
 }
 
 void VKApplication::cleanup() {
-
 	vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
+	vkDestroyRenderPass(logicalDevice, renderPass, nullptr);
 
 	for (auto imageView : swapChainImageViews){
 		vkDestroyImageView(logicalDevice, imageView, nullptr);
@@ -320,6 +321,74 @@ void VKApplication::createImageViews()
 		if (vkCreateImageView(logicalDevice, &createInfo, nullptr, &swapChainImageViews[i]) != VK_SUCCESS) {
 			throw std::runtime_error("Failed to create image view!");
 		}
+	}
+}
+
+void VKApplication::createRenderPass()
+{
+	//Attachment Description
+	//In this case a single color buffer attachment represented by on of the images from the swp chain
+	VkAttachmentDescription colorAttachment{};
+	colorAttachment.format = swapChainImageFormat;
+	colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT; //Not mulitsampling so just 1 sample
+	//loadOp and storeOp determine what to do with the data in the attachment before rendering and after rendering. 
+	//For loadOp:
+	//VK_ATTACHMENT_LOAD_OP_LOAD: Preserve the existing contents of the attachment
+	//VK_ATTACHMENT_LOAD_OP_CLEAR: Clear the values to a constant at the start
+	//VK_ATTACHMENT_LOAD_OP_DONT_CARE : Existing contents are undefined; we don't care about them
+	colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	//For storeOp:
+	//VK_ATTACHMENT_STORE_OP_STORE: Rendered contents will be stored in memory and can be read later
+	//VK_ATTACHMENT_STORE_OP_DONT_CARE: Contents of the framebuffer will be undefined after the rendering operation
+	colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; //We're interested in seeing the rendered triangle on the screen, so we're going with the store operation
+	//Our application won't do anything with the stencil buffer, so the results of loading and storing are irrelevant.
+	colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	//Textures and framebuffers in Vulkan are represented by VkImage objects with a certain pixel format, however the layout of the pixels in memory can change based on what you're trying to do with an image.
+	//Some of the most common layouts are:
+	//VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL: Images used as color attachment
+	//VK_IMAGE_LAYOUT_PRESENT_SRC_KHR: Images to be presented in the swap chain
+	//VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL : Images to be used as destination for a memory copy operation
+	//InitialLayout: specifies which layout the image will have before the render pass begins.
+	colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED; //we don't care what previous layout the image was in. The caveat of this special value is that the contents of the image are not guaranteed to be preserved, but that doesn't matter since we're going to clear it anyway.
+	//Finallayout: specifies the layout to automatically transition to when the render pass finishes.
+	colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; //We want the image to be ready for presentation using the swap chain after rendering
+
+	//Subpasses and attachment references
+	
+	//A single redener pass can consist of multiple subpasses.
+	//Subpasses are subsequent rendering operations that depend on the contents of framebuffers in previous passes, for example a sequence of post-processing effects that are applied one after another.
+	//If you group these rendering operations into one render pass, then Vulkan is able to reorder the operations and conserve memory bandwidth for possibly better performance.
+
+	//Attachment references
+	//Every subpass references one or more of the attachments that we've described using the structure in the previous sections. These references are themselves VkAttachmentReference structs that look like this:
+	VkAttachmentReference colorAttachmentRef{};
+	colorAttachmentRef.attachment = 0; //specifies which attachment to reference by its index in the attachment descriptions array.
+	colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; //specifies which layout we would like the attachment to have during a subpass that uses this reference. Vulkan will automatically transition the attachment to this layout when the subpass is started. We intend to use the attachment to function as a color buffer 
+
+	//Subpass description
+	VkSubpassDescription subpass{};
+	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;//Vulkan may also support compute subpasses in the future, so we have to be explicit about this being a graphics subpass.
+	subpass.colorAttachmentCount = 1;
+	subpass.pColorAttachments = &colorAttachmentRef; //The index of the attachment in this array is directly referenced from the fragment shader with the layout(location = 0) out vec4 outColor directive!
+	//The following other types of attachments can be referenced by a subpass:
+	//pInputAttachments: Attachments that are read from a shader
+	//pResolveAttachments: Attachments used for multisampling color attachments
+	//pDepthStencilAttachment: Attachment for depth and stencil data
+	//pPreserveAttachments: Attachments that are not used by this subpass, but for which the data must be preserved
+
+	
+	//Render Pass
+
+	VkRenderPassCreateInfo renderPassInfo{};
+	renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+	renderPassInfo.attachmentCount = 1;
+	renderPassInfo.pAttachments = &colorAttachment;
+	renderPassInfo.subpassCount = 1;
+	renderPassInfo.pSubpasses = &subpass;
+
+	if (vkCreateRenderPass(logicalDevice, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create render pass!");
 	}
 }
 
