@@ -43,6 +43,8 @@ void VKApplication::mainLoop() {
 }
 
 void VKApplication::cleanup() {
+	vkDestroyCommandPool(logicalDevice, commandPool, nullptr);
+
 	for (auto framebuffer : swapChainFramebuffers) {
 		vkDestroyFramebuffer(logicalDevice, framebuffer, nullptr);
 	}
@@ -330,8 +332,7 @@ void VKApplication::createImageViews()
 	}
 }
 
-void VKApplication::createRenderPass()
-{
+void VKApplication::createRenderPass(){
 	//Attachment Description
 	//In this case a single color buffer attachment represented by on of the images from the swp chain
 	VkAttachmentDescription colorAttachment{};
@@ -609,8 +610,7 @@ void VKApplication::createGraphicsPipeline(){
 	vkDestroyShaderModule(logicalDevice, vertShaderModule, nullptr);
 }
 
-void VKApplication::createFramebuffers()
-{
+void VKApplication::createFramebuffers(){
 	//The attachments specified during render pass creation are bound by wrapping them into a VkFramebuffer object. A framebuffer object references all of the VkImageView objects that represent the attachments
 	//However, the image that we have to use for the attachment depends on which image the swap chain returns when we retrieve one for presentation. That means that we have to create a framebuffer for all of the images in the swap chain and use the one that corresponds to the retrieved image at drawing time.
 
@@ -634,6 +634,42 @@ void VKApplication::createFramebuffers()
 		if (vkCreateFramebuffer(logicalDevice, &framebufferInfo, nullptr, &swapChainFramebuffers[i]) != VK_SUCCESS) {
 			throw std::runtime_error("Failed to create framebuffer!");
 		}
+	}
+}
+
+void VKApplication::createCommandPool(){
+	QueueFamilyIndices queueFamiliyIndices = findQueueFamilies(physicalDevice);
+
+	VkCommandPoolCreateInfo poolInfo{};
+	poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	//There are two possible flags for command pools:
+	//	VK_COMMAND_POOL_CREATE_TRANSIENT_BIT: Hint that command buffers are rerecorded with new commands very often (may change memory allocation behavior)
+	//	VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT: Allow command buffers to be rerecorded individually, without this flag they all have to be reset together
+	poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT; //We will be recording a command buffer every frame, so we want to be able to reset and rerecord over it
+	//Command buffers are executed by submitting them on one of the device queues, like the graphics and presentation queues we retrieved.
+	//Each command pool can only allocate command buffers that are submitted on a single type of queue. 
+	//We're going to record commands for drawing, which is why we've chosen the graphics queue family.
+	poolInfo.queueFamilyIndex = queueFamiliyIndices.graphicsFamily.value();
+
+	if (vkCreateCommandPool(logicalDevice, &poolInfo, nullptr, &commandPool) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create command pool!");
+	}
+}
+
+void VKApplication::createCommandBuffer(){
+
+	//Specifies the command pool and number of buffers to allocate:
+	VkCommandBufferAllocateInfo allocInfo{};
+	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocInfo.commandPool = commandPool;
+	//The level parameter specifies if the allocated command buffers are primary or secondary command buffers.
+	//- VK_COMMAND_BUFFER_LEVEL_PRIMARY: Can be submitted to a queue for execution, but cannot be called from other command buffers.
+	//- VK_COMMAND_BUFFER_LEVEL_SECONDARY: Cannot be submitted directly, but can be called from primary command buffers.
+	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocInfo.commandBufferCount = 1;
+
+	if (vkAllocateCommandBuffers(logicalDevice, &allocInfo, &commandBuffer) != VK_SUCCESS) {
+		throw std::runtime_error("failed to allocate command buffers!");
 	}
 }
 

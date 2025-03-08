@@ -70,7 +70,7 @@ private:
 	VkDevice logicalDevice;
 
 	//Receive commands to be executed on physical device (queues are automatically created along with the logical device)
-	//We can use the vkGetDeviceQueue function to retrieve queue handles for each queue family. 
+	//- We can use the vkGetDeviceQueue function to retrieve queue handles for each queue family. 
 	VkQueue graphicsQueue;
 
 	//Queue that supports presentation
@@ -102,6 +102,15 @@ private:
 	//Holds frambuffers: references all of the VkImage view objects that represent the attachments. Create a frame buffer for all the images in the swap chain and use the one that corresponds to the retrieved image at drawing time
 	std::vector<VkFramebuffer> swapChainFramebuffers;
 
+	//We have to create command pool before we can create command buffers. They manage the memory that is used to store the buffers and command buffers are allocated from them
+	VkCommandPool commandPool;
+
+	//Command Buffer: Commands in Vulkan, like drawing operations and memory transfers, are not executed directly using function calls. You have to record all of the operations you want to perform in command buffer objects. 
+	//- The advantage of this is that when we are ready to tell the Vulkan what we want to do, all of the commands are submitted together and Vulkan can more efficiently process the commands since all of them are available together.
+	//- In addition, this allows command recording to happen in multiple threads if so desired.
+	//- Command buffers will be automatically freed when their command pool is destroyed, so we don't need explicit cleanup.
+	VkCommandBuffer commandBuffer;
+
 	//Main funcitions for Run()
 	void initWindows();
 
@@ -130,6 +139,10 @@ private:
 	void createGraphicsPipeline();
 
 	void createFramebuffers();
+
+	void createCommandPool();
+
+	void createCommandBuffer();
 
 	//Helper functions
 	
