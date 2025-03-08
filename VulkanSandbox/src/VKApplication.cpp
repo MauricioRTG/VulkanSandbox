@@ -32,6 +32,7 @@ void VKApplication::initVulkan() {
 	createImageViews();
 	createRenderPass();
 	createGraphicsPipeline();
+	createFramebuffers();
 }
 
 void VKApplication::mainLoop() {
@@ -42,6 +43,11 @@ void VKApplication::mainLoop() {
 }
 
 void VKApplication::cleanup() {
+	for (auto framebuffer : swapChainFramebuffers) {
+		vkDestroyFramebuffer(logicalDevice, framebuffer, nullptr);
+	}
+
+	vkDestroyPipeline(logicalDevice, graphicsPipeline, nullptr);
 	vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
 	vkDestroyRenderPass(logicalDevice, renderPass, nullptr);
 
@@ -565,9 +571,70 @@ void VKApplication::createGraphicsPipeline(){
 		throw std::runtime_error("Failed to createpipeline layout!");
 	}
 
+	//Create Graphics Pipeline using:
+	//Shader stages: the shader modules that define the functionality of the programmable stages of the graphics pipeline
+	//Fixed-function state: all of the structures that define the fixed-function stages of the pipeline, like input assembly, rasterizer, viewport and color blending
+	//Pipeline layout: the uniform and push values referenced by the shader that can be updated at draw time
+	//Render pass: the attachments referenced by the pipeline stages and their usage
+
+	VkGraphicsPipelineCreateInfo pipelineInfo{};
+	//Shader stages
+	pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	pipelineInfo.stageCount = 2; //Vertex shader and fragment shader
+	pipelineInfo.pStages = shaderStages;
+	//Fixed-functions states
+	pipelineInfo.pVertexInputState = &vertexInputInfo;
+	pipelineInfo.pInputAssemblyState = &inputAssembly;
+	pipelineInfo.pViewportState = &viewportState;
+	pipelineInfo.pRasterizationState = &rasterizer;
+	pipelineInfo.pMultisampleState = &multisampling;
+	pipelineInfo.pDepthStencilState = nullptr;
+	pipelineInfo.pColorBlendState = &colorBlending;
+	pipelineInfo.pDynamicState = &dynamicState;
+	//Pipeline layout
+	pipelineInfo.layout = pipelineLayout;
+	//Render pass
+	pipelineInfo.renderPass = renderPass;
+	pipelineInfo.subpass = 0;// index of the sub pass where this graphics pipeline will be used.
+	//Vulkan allows you to create a new graphics pipeline by deriving from an existing pipeline. The idea of pipeline derivatives is that it is less expensive to set up pipelines when they have much functionality in common with an existing pipeline and switching between pipelines from the same parent can also be done quicker. Using either the handle of an exisiting pipeline or reference another pipeline that is about to be created by index with 
+	pipelineInfo.basePipelineHandle = VK_NULL_HANDLE; // Optional
+	pipelineInfo.basePipelineIndex = -1; // Optional
+
+	if (vkCreateGraphicsPipelines(logicalDevice, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &graphicsPipeline) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create graphics pipeline!");
+	}
+
 	//Destroy shader modules
 	vkDestroyShaderModule(logicalDevice, fragShaderModule, nullptr);
 	vkDestroyShaderModule(logicalDevice, vertShaderModule, nullptr);
+}
+
+void VKApplication::createFramebuffers()
+{
+	//The attachments specified during render pass creation are bound by wrapping them into a VkFramebuffer object. A framebuffer object references all of the VkImageView objects that represent the attachments
+	//However, the image that we have to use for the attachment depends on which image the swap chain returns when we retrieve one for presentation. That means that we have to create a framebuffer for all of the images in the swap chain and use the one that corresponds to the retrieved image at drawing time.
+
+	swapChainFramebuffers.resize(swapChainImageViews.size());
+
+	//Iterate thorugh the image views and create framebuffers
+	for (size_t i = 0; i < swapChainImageViews.size(); i++) {
+		VkImageView attachments[] = {
+			swapChainImageViews[i]
+		};
+
+		VkFramebufferCreateInfo framebufferInfo{};
+		framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+		framebufferInfo.renderPass = renderPass; //You can only use a framebuffer with the render passes that it is compatible with, which roughly means that they use the same number and type of attachments.
+		framebufferInfo.attachmentCount = 1;
+		framebufferInfo.pAttachments = attachments; //specify the VkImageView objects that should be bound to the respective attachment descriptions in the render pass pAttachment array
+		framebufferInfo.width = swapChainExtent.width;
+		framebufferInfo.height = swapChainExtent.height;
+		framebufferInfo.layers = 1; //refers to the number of layers in image arrays. Our swap chain images are single images, so the number of layers is 1
+
+		if (vkCreateFramebuffer(logicalDevice, &framebufferInfo, nullptr, &swapChainFramebuffers[i]) != VK_SUCCESS) {
+			throw std::runtime_error("Failed to create framebuffer!");
+		}
+	}
 }
 
 bool VKApplication::checkValidationLayerSupport(){

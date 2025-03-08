@@ -96,6 +96,12 @@ private:
 	//Pipeline layout
 	VkPipelineLayout pipelineLayout;
 
+	//Graphics pipeline
+	VkPipeline graphicsPipeline;
+
+	//Holds frambuffers: references all of the VkImage view objects that represent the attachments. Create a frame buffer for all the images in the swap chain and use the one that corresponds to the retrieved image at drawing time
+	std::vector<VkFramebuffer> swapChainFramebuffers;
+
 	//Main funcitions for Run()
 	void initWindows();
 
@@ -122,6 +128,8 @@ private:
 	void createRenderPass();
 
 	void createGraphicsPipeline();
+
+	void createFramebuffers();
 
 	//Helper functions
 	
