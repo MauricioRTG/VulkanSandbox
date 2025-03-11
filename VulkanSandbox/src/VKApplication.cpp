@@ -33,6 +33,8 @@ void VKApplication::initVulkan() {
 	createRenderPass();
 	createGraphicsPipeline();
 	createFramebuffers();
+	createCommandPool();
+	createCommandBuffer();
 }
 
 void VKApplication::mainLoop() {
@@ -908,8 +910,7 @@ std::vector<char> VKApplication::readFile(const std::string& filename){
 	return buffer;
 }
 
-VkShaderModule VKApplication::createShaderModule(const std::vector<char>& code) const
-{
+VkShaderModule VKApplication::createShaderModule(const std::vector<char>& code) const{
 	//Struct that provide info for creating shader module
 	VkShaderModuleCreateInfo createInfo{};
 	createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
@@ -923,4 +924,83 @@ VkShaderModule VKApplication::createShaderModule(const std::vector<char>& code) 
 	}
 
 	return shaderModule;
+}
+
+void VKApplication::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex){
+	// Begin Command buffer recording
+
+	VkCommandBufferBeginInfo beginInfo{};
+	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	//The flags parameter specifies how we're going to use the command buffer:
+	//	VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT: The command buffer will be rerecorded right after executing it once.
+	//	VK_COMMAND_BUFFER_USAGE_RENDER_PASS_CONTINUE_BIT: This is a secondary command buffer that will be entirely within a single render pass.
+	//	VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT: The command buffer can be resubmitted while it is also already pending execution.
+	beginInfo.flags = 0;
+	beginInfo.pInheritanceInfo = nullptr; //Only relevant for secondary command buffers. It specifies which state to inherit from the calling primary command buffers.
+
+	if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to being recoring command buffer!");
+	}
+
+	// Starting render pass
+
+	VkRenderPassBeginInfo renderPassInfo{};
+	renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+	renderPassInfo.renderPass = renderPass;
+	// We created a framebuffer for each swap chain image where it is specified as a color attachment.
+	renderPassInfo.framebuffer = swapChainFramebuffers[imageIndex]; // we need to bind the framebuffer for the swapchain image we want to draw to. Using the imageIndex parameter which was passed in, we can pick the right framebuffer for the current swapchain image.
+	//Define the size fo the render area
+	//he render area defines where shader loads and stores will take place. 
+	// The pixels outside this region will have undefined values. It should match the size of the attachments for best performance.
+	renderPassInfo.renderArea.offset = { 0, 0 }; 
+	renderPassInfo.renderArea.extent = swapChainExtent;
+	// define the clear values to use for VK_ATTACHMENT_LOAD_OP_CLEAR, which we used as load operation for the color attachment.
+	VkClearValue clearColor = { {{0.0f, 0.0f, 0.0f, 1.0f}} }; //Black with 100% opacity.
+	renderPassInfo.clearValueCount = 1;
+	renderPassInfo.pClearValues = &clearColor;
+
+	// Command to begin render pass
+	
+	//VkSubpassContents controls how the drawing commands within the render pass will be provided:
+	//	VK_SUBPASS_CONTENTS_INLINE: The render pass commands will be embedded in the primary command buffer itself and no secondary command buffers will be executed.
+	//	VK_SUBPASS_CONTENTS_SECONDARY_COMMAND_BUFFERS: The render pass commands will be executed from secondary command buffers.
+	vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+	// Bind Pipeline
+	// controls how the drawing commands within the render pass will be provided.
+	vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+
+	//With this we have told Vulkan which operations to execute in the graphics pipeline and which attachment to use in the fagment shader
+
+	//Set viewport and scissior
+	VkViewport viewport{};
+	viewport.x = 0.0f;
+	viewport.y = 0.0f;
+	viewport.width = static_cast<float>(swapChainExtent.width);
+	viewport.height = static_cast<float>(swapChainExtent.height);
+	viewport.minDepth = 0.0f;
+	viewport.maxDepth = 1.0f;
+	vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+	VkRect2D scissor{};
+	scissor.offset = { 0, 0 };
+	scissor.extent = swapChainExtent;
+	vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+	//Draw command
+	//vertexCount: Even though we don't have a vertex buffer, we technically still have 3 vertices to draw.
+	//instanceCount: Used for instanced rendering, use 1 if you're not doing that.
+	//firstVertex : Used as an offset into the vertex buffer, defines the lowest value of gl_VertexIndex.
+	//firstInstance : Used as an offset for instanced rendering, defines the lowest value of gl_InstanceIndex.
+	vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+
+	// End render pass
+
+	vkCmdEndRenderPass(commandBuffer);
+
+	//End Command buffer
+
+	if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to record command buffer!");
+	}
 }

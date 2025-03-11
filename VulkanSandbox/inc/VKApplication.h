@@ -175,4 +175,6 @@ private:
 	static std::vector<char> readFile(const std::string& filename);
 
 	VkShaderModule createShaderModule(const std::vector<char>& code) const;
+
+	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
 };
