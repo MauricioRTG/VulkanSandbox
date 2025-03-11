@@ -35,16 +35,26 @@ void VKApplication::initVulkan() {
 	createFramebuffers();
 	createCommandPool();
 	createCommandBuffer();
+	createSyncObjects();
 }
 
 void VKApplication::mainLoop() {
 	//Check for events like pressing the X button until the window has been closed by the user
 	while (!glfwWindowShouldClose(window)) {
 		glfwPollEvents();
+		drawFrame();
 	}
+
+	//Wait for the logical device to finish operations before exiting mainLoop and destroying the window
+	//Becuase: drawing and presentation operations may still be going on. Cleaning up resources while that is happening is a bad idea.
+	vkDeviceWaitIdle(logicalDevice);
 }
 
 void VKApplication::cleanup() {
+	vkDestroySemaphore(logicalDevice, renderFinishedSemaphore, nullptr);
+	vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
+	vkDestroyFence(logicalDevice, inFlightFence, nullptr);
+
 	vkDestroyCommandPool(logicalDevice, commandPool, nullptr);
 
 	for (auto framebuffer : swapChainFramebuffers) {
@@ -386,7 +396,32 @@ void VKApplication::createRenderPass(){
 	//pDepthStencilAttachment: Attachment for depth and stencil data
 	//pPreserveAttachments: Attachments that are not used by this subpass, but for which the data must be preserved
 
+	// Subpass dependencies
+
+	//Subpasses in a render pass automatically take care of image layout transitions. These transitions are controlled by subpass dependencies, which specify memory and execution dependencies between subpasses
+
+	// Why Do We Need an Explicit Subpass Dependency?
+	// - The default implicit dependency assumes that the color attachment image is available at the very start of the pipeline. However, this is not always true because the swap chain may still be using it (e.g., for presenting the previous frame).
+	// - The render pass needs to wait for the swap chain to release the image before it can start using it as a color attachment.
+	// - By default, Vulkan does not enforce this waiting correctly, so we have to manually synchronize it with a subpass dependency. Vulkan doesn't automatically wait for the swap chain image to become available before the render pass starts.
 	
+	//We define a VkSubpassDependency struct to create an explicit dependency between the previous implicit stage (VK_SUBPASS_EXTERNAL) and the color attachment output stage (subpass 0 in our case).
+	//A subpass dependency ensures that writing to the color attachment only happens after the swap chain releases the image.
+	//This avoids race conditions and ensures proper image layout transitions.
+	VkSubpassDependency dependency{};
+	//The first two fields specify the indices of the dependency and the dependent subpass.
+	dependency.srcSubpass = VK_SUBPASS_EXTERNAL; //This refers to operations happening before the render pass starts (e.g., image acquisition by the swap chain).
+	dependency.dstSubpass = 0; // This refers to the first (and only) subpass, where the color attachment is written.
+	//The next two fields specify the operations to wait on and the stages in which these operations occur
+	//We need to wait for the swap chain to finish reading from the image before we can access it.
+	//This can be accomplished by waiting on the color attachment output stage itself.
+	dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; //This ensures the render pass waits until the swap chain finishes reading from the image.
+	dependency.srcAccessMask = 0; // No memory access needed before this
+	//The operations that should wait on this are in the color attachment stage and involve the writing of the color attachment. 
+	//These settings will prevent the transition from happening until it's actually necessary (and allowed): when we want to start writing colors to it.
+	dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; //The color attachment write operations will only happen after the image is available.
+	dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT; // Ensures we can write safely
+
 	//Render Pass
 
 	VkRenderPassCreateInfo renderPassInfo{};
@@ -395,6 +430,8 @@ void VKApplication::createRenderPass(){
 	renderPassInfo.pAttachments = &colorAttachment;
 	renderPassInfo.subpassCount = 1;
 	renderPassInfo.pSubpasses = &subpass;
+	renderPassInfo.dependencyCount = 1;
+	renderPassInfo.pDependencies - &dependency;
 
 	if (vkCreateRenderPass(logicalDevice, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS) {
 		throw std::runtime_error("Failed to create render pass!");
@@ -672,6 +709,24 @@ void VKApplication::createCommandBuffer(){
 
 	if (vkAllocateCommandBuffers(logicalDevice, &allocInfo, &commandBuffer) != VK_SUCCESS) {
 		throw std::runtime_error("failed to allocate command buffers!");
+	}
+}
+
+void VKApplication::createSyncObjects(){
+	VkSemaphoreCreateInfo semaphoreInfo{};
+	semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+	VkFenceCreateInfo fenceInfo{};
+	fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	//inFlightFence is only signaled after a frame has finished rendering, yet since this is the first frame, there are no previous frames in which to signal the fence! Thus vkWaitForFences() blocks indefinitely, waiting on something which will never happen.
+	//reate the fence in the signaled state, so that the first call to vkWaitForFences() returns immediately since the fence is already signaled.
+	fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+	//Create semaphores and fence
+	if (vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
+		vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS ||
+		vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create semaphores or fence!");
 	}
 }
 
@@ -1003,4 +1058,82 @@ void VKApplication::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
 	if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
 		throw std::runtime_error("Failed to record command buffer!");
 	}
+}
+
+void VKApplication::drawFrame(){
+	// Waiting for the previous frame
+	
+	//takes an array of fences and waits on the host for either any or all of the fences to be signaled before returning. 
+	// - The VK_TRUE we pass here indicates that we want to wait for all fences, but in the case of a single one it doesn't matter.
+	// - This function also has a timeout parameter that we set to the maximum value of a 64 bit unsigned integer, UINT64_MAX, which effectively disables the timeout.
+	vkWaitForFences(logicalDevice, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
+
+	//After waiting, we need to manually reset the fence to the unsignaled state
+	vkResetFences(logicalDevice, 1, &inFlightFence);
+
+	// Acquiring an image for the swap chain
+
+	uint32_t imageIndex;
+	//The third parameter specifies a timeout in nanoseconds for an image to become available. Using the maximum value of a 64 bit unsigned integer means we effectively disable the timeout.
+	// The next two parameters specify synchronization objects that are to be signaled when the presentation engine is finished using the image. That's the point in time where we can start drawing to it. 
+	//The last parameter specifies a variable to output the index of the swap chain image that has become available.
+	//The index refers to the VkImage in our swapChainImages array. We're going to use that index to pick the VkFrameBuffer.
+	vkAcquireNextImageKHR(logicalDevice, swapChain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+
+	// Recording the command buffer
+
+	//Makes sure the command buffer is able to be recorded
+	//The second parameter of vkResetCommandBuffer is a VkCommandBufferResetFlagBits flag. Since we don't want to do anything special, we leave it as 0.
+	vkResetCommandBuffer(commandBuffer, 0);
+	
+	//Record commands to command buffer
+	recordCommandBuffer(commandBuffer, imageIndex);
+
+	// Submitting the command buffer in queue
+	VkSubmitInfo submitInfo{};
+	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+	VkSemaphore waitSemaphores[] = { imageAvailableSemaphore };
+	VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+	//The first three parameters specify which semaphores to wait on before execution begins and in which stage(s) of the pipeline to wait. 
+	//We want to wait with writing colors to the image until it's available, so we're specifying the stage of the graphics pipeline that writes to the color attachment. 
+	submitInfo.waitSemaphoreCount = 1;
+	submitInfo.pWaitSemaphores = waitSemaphores;
+	submitInfo.pWaitDstStageMask = waitStages;
+	//The next two parameters specify which command buffers to actually submit for execution.
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &commandBuffer;
+	// The signalSemaphoreCount and pSignalSemaphores parameters specify which semaphores to signal once the command buffer(s) have finished execution. 
+	//In our case we're using the renderFinishedSemaphore for that purpose.
+	VkSemaphore signalSemaphores[] = { renderFinishedSemaphore };
+	submitInfo.signalSemaphoreCount = 1;
+	submitInfo.pSignalSemaphores = signalSemaphores;
+
+	//Submit the command buffer to the graphics queue using vkQueueSubmit
+	//The last parameter references an optional fence that will be signaled when the command buffers finish execution.
+	// This allows us to know when it is safe for the command buffer to be reused
+	// Now on the next frame, the CPU will wait for this command buffer to finish executing before it records new commands into it.
+	if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFence) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to submit draw command buffer!");
+	}
+
+	// Presentation
+
+	//The last step of drawing a frame is submitting the result back to the swap chain to have it eventually show up on the screen.
+	VkPresentInfoKHR presentInfo{};
+	presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+	//The first two parameters specify which semaphores to wait on before presentation can happen
+	//Since we want to wait on the command buffer to finish execution, thus our triangle being drawn, we take the semaphores which will be signalled and wait on them
+	presentInfo.waitSemaphoreCount = 1;
+	presentInfo.pWaitSemaphores = signalSemaphores;
+	//The next two parameters specify the swap chains to present images to and the index of the image for each swap chain. 
+	VkSwapchainKHR swapChains[] = { swapChain };
+	presentInfo.swapchainCount = 1;
+	presentInfo.pSwapchains = swapChains;
+	presentInfo.pImageIndices = &imageIndex;
+	// It allows you to specify an array of VkResult values to check for every individual swap chain if presentation was successful. It's not necessary if you're only using a single swap chain, because you can simply use the return value of the present function.
+	presentInfo.pResults = nullptr; // Optional
+
+	//Submit the request to present an image to the swap chain
+	vkQueuePresentKHR(presentQueue, &presentInfo);
 }

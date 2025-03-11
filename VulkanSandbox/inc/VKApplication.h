@@ -111,6 +111,13 @@ private:
 	//- Command buffers will be automatically freed when their command pool is destroyed, so we don't need explicit cleanup.
 	VkCommandBuffer commandBuffer;
 
+	//Semaphore to signal that an image has been acquired from the swapchain and is ready for rendering
+	VkSemaphore imageAvailableSemaphore;
+	//Semaphore to signal that rendering has finished and presentation can happen
+	VkSemaphore renderFinishedSemaphore;
+	//A fence to make sure only one frame is rendering at a time
+	VkFence inFlightFence;
+
 	//Main funcitions for Run()
 	void initWindows();
 
@@ -144,6 +151,8 @@ private:
 
 	void createCommandBuffer();
 
+	void createSyncObjects();
+
 	//Helper functions
 	
 	bool checkValidationLayerSupport();
@@ -176,5 +185,81 @@ private:
 
 	VkShaderModule createShaderModule(const std::vector<char>& code) const;
 
+	// Draw commands
+
 	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex);
+
+	//Rendering a frame in Vulkan consists of a common set of steps:
+	// - Wait for the previous frame to finish
+	// - Acquire an image from the swap chain
+	// - Record a command buffer which draws the scene onto the iamge
+	// - Submit the recorded command buffer
+	// - Present the swap chain image
+	void drawFrame();
+
+	// Synchronization
+	/*
+	* In Vulkan synchronization of execution on the GPU is explicit
+	* Many Vulkan API calls which start executing work on the GPU are asynchronous, the functions will return before the operation has finished
+	* We need to order explicitly the folowing events because they can happen in parralle on the GPU are:
+	* - Acquire an image from the swap chain
+	* - Execute commands that draw onto the acquire image
+	* - Present that image to the screen for presentation, returning it to the swapchain
+	* 
+	* Semaphores
+	* A semaphore is used to add order between queue operations.
+	* Queue operations refer to the work we submit to a queue, either in a command buffer or from within a function 
+	* 
+	* Examples of queues are: the graphics queue and the presentation queue. Semaphores are used both to order work inside the same queue and between different queues.
+	* Two kinds of semaphores in Vulkan: binary and timeline
+	* 
+	* A semaphore (binary) is either unsignaled or signaled. It begins life as unsignaled. The way we use a semaphore to order queue operations is by providing the same semaphore as a 'signal' semaphore in one queue operation and as a 'wait' semaphore in another queue operation
+	* - What we tell Vulkan is that operation A will 'signal' semaphore S when it finishes executing, and operation B will 'wait' on semaphore S before it begins executing.
+	* - After operation B begins executing, semaphore S is automatically reset back to being unsignaled, allowing it to be used again.
+	* 
+	* VkCommandBuffer A, B = ... // record command buffers
+	* VkSemaphore S = ... // create a semaphore
+	* 
+	* // enqueue A, signal S when done - starts executing immediately
+	* vkQueueSubmit(work: A, signal: S, wait: None)
+	* 
+	* // enqueue B, wait on S to start
+	* vkQueueSubmit(work: B, signal: None, wait: S)
+	* 
+	* Note: The waiting only happens on the GPU. The CPU continues running without blocking. To make the CPU wait, we need a different synchronization primitive (fences)
+	* 
+	* Fences
+	* A fence has a similar purpose, in that it is used to synchronize execution, but it is for ordering the execution on the CPU, otherwise known as the host.
+	* Simply put, if the host needs to know when the GPU has finished something, we use a fence.
+	* 
+	* Similar to semaphores, fences are either in a signaled or unsignaled state. Whenever we submit work to execute, we can attach a fence to that work. When the work is finished, the fence will be signaled. Then we can make the host wait for the fence to be signaled, guaranteeing that the work has finished before the host continues.
+	* 
+	* A concrete example is taking a screenshot:
+	* Say we have already done the necessary work on the GPU. Now need to transfer the image from the GPU over to the host and then save the memory to a file
+	* 
+	* VkCommandBuffer A = ... // record command buffer with the transfer
+	* VkFence F = ... // create the fence
+	* 
+	* // enqueue A, start work immediately, signal F when done
+	* vkQueueSubmit(work: A, fence: F)
+	* 
+	* vkWaitForFence(F) // blocks execution until A has finished executing
+	* 
+	* save_screenshot_to_disk() // can't run until the transfer has finished
+	* 
+	* In general, it is preferable to not block the host unless necessary. We want to feed the GPU and the host with useful work to do. 
+	* Thus we prefer semaphores, or other synchronization primitives not yet covered, to synchronize our work.
+	* 
+	* Fences must be reset manually to put them back into the unsignaled state
+	* 
+	* How to use them?
+	* - Semaphores: for swapchain operations because they happen on the GPU, thus we don't want to make the host wait around if we can help it.
+	* - Fences: Waiting for the previous frame to finish, because we need the host to wait.
+	*		This is so we don't draw more than one frame at a time. 
+	*		Because we re-record the command buffer every frame, we cannot record the next frame's work to the command buffer until the current frame has finished executing, as we don't want to overwrite the current contents of the command buffer while the GPU is using it.
+	* 
+	*/
+
+
+
 };
