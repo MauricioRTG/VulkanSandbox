@@ -431,7 +431,7 @@ void VKApplication::createRenderPass(){
 	renderPassInfo.subpassCount = 1;
 	renderPassInfo.pSubpasses = &subpass;
 	renderPassInfo.dependencyCount = 1;
-	renderPassInfo.pDependencies - &dependency;
+	renderPassInfo.pDependencies = &dependency;
 
 	if (vkCreateRenderPass(logicalDevice, &renderPassInfo, nullptr, &renderPass) != VK_SUCCESS) {
 		throw std::runtime_error("Failed to create render pass!");
@@ -440,8 +440,8 @@ void VKApplication::createRenderPass(){
 
 void VKApplication::createGraphicsPipeline(){
 	//Read shader SPIR-V Files
-	auto vertShaderCode = readFile("VulkanSandbox/shaders/vert.spv");
-	auto fragShaderCode = readFile("VulkanSandbox/shaders/frag.spv");
+	auto vertShaderCode = readFile("shaders/vert.spv");
+	auto fragShaderCode = readFile("shaders/frag.spv");
 
 	//Create Shader modules
 	VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
@@ -608,7 +608,7 @@ void VKApplication::createGraphicsPipeline(){
 
 	if (vkCreatePipelineLayout(logicalDevice, &pipelineLayoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS)
 	{
-		throw std::runtime_error("Failed to createpipeline layout!");
+		throw std::runtime_error("Failed to create pipeline layout!");
 	}
 
 	//Create Graphics Pipeline using:
@@ -708,7 +708,7 @@ void VKApplication::createCommandBuffer(){
 	allocInfo.commandBufferCount = 1;
 
 	if (vkAllocateCommandBuffers(logicalDevice, &allocInfo, &commandBuffer) != VK_SUCCESS) {
-		throw std::runtime_error("failed to allocate command buffers!");
+		throw std::runtime_error("Failed to allocate command buffers!");
 	}
 }
 
@@ -726,7 +726,7 @@ void VKApplication::createSyncObjects(){
 	if (vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
 		vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS ||
 		vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
-		throw std::runtime_error("failed to create semaphores or fence!");
+		throw std::runtime_error("Failed to create semaphores or fence!");
 	}
 }
 
@@ -950,6 +950,7 @@ std::vector<char> VKApplication::readFile(const std::string& filename){
 
 	std::ifstream file(filename, std::ios::ate | std::ios::binary);
 	if (!file.is_open()) {
+		std::cout << "Failed to open file!" << std::endl;
 		throw std::runtime_error("Failed to open file!");
 	}
 
