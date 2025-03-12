@@ -122,6 +122,10 @@ private:
 	//A fence to make sure only one frame is rendering at a time
 	std::vector<VkFence> inFlightFences;
 
+	//Handling resizes explicitly
+	//Although many drivers and platforms trigger VK_ERROR_OUT_OF_DATE_KHR automatically after a window resize, it is not guaranteed to happen.
+	bool framebufferrResized = false;
+
 	//To use the right objects every frame, we need to keep track of the current frame.
 	uint32_t currentFrame = 0;
 
@@ -266,4 +270,17 @@ private:
 	*		Because we re-record the command buffer every frame, we cannot record the next frame's work to the command buffer until the current frame has finished executing, as we don't want to overwrite the current contents of the command buffer while the GPU is using it.
 	* 
 	*/
+
+	// Swap chain recreation
+
+	// It is possible for the window surface to change such that the swap chain is no longer compatible with it. 
+	// One of the reasons that could cause this to happen is the size of the window changing. We have to catch these events and recreate the swap chain.
+	void recreateSwapChain();
+
+	//To make sure that the old versions of these objects (swapcahin, framebuffers and image views) are cleaned up before recreating them
+	void cleanupSwapChain();
+
+	//Resize window callback
+	//Set the frambufferResized flag
+	static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
 };
