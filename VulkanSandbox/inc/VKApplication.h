@@ -18,6 +18,10 @@
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 
+//Allow multiple frames to be in-flight at once, that is to say, allow the rendering of one frame to not interfere with the recording of the next.
+// - Thus, we need multiple command buffers, semaphores, and fences. 
+const int MAX_FRAMES_IN_FLIGHT = 2;
+
 const std::vector<const char*> validationLayers = {
 	"VK_LAYER_KHRONOS_validation"
 };
@@ -56,7 +60,7 @@ class VKApplication {
 public:
 	void run();
 private:
-	class GLFWwindow* window;
+	GLFWwindow* window;
 	
 	/*  Vulkan handles */
 
@@ -109,14 +113,17 @@ private:
 	//- The advantage of this is that when we are ready to tell the Vulkan what we want to do, all of the commands are submitted together and Vulkan can more efficiently process the commands since all of them are available together.
 	//- In addition, this allows command recording to happen in multiple threads if so desired.
 	//- Command buffers will be automatically freed when their command pool is destroyed, so we don't need explicit cleanup.
-	VkCommandBuffer commandBuffer;
+	std::vector<VkCommandBuffer> commandBuffers;
 
 	//Semaphore to signal that an image has been acquired from the swapchain and is ready for rendering
-	VkSemaphore imageAvailableSemaphore;
+	std::vector<VkSemaphore> imageAvailableSemaphores;
 	//Semaphore to signal that rendering has finished and presentation can happen
-	VkSemaphore renderFinishedSemaphore;
+	std::vector<VkSemaphore> renderFinishedSemaphores;
 	//A fence to make sure only one frame is rendering at a time
-	VkFence inFlightFence;
+	std::vector<VkFence> inFlightFences;
+
+	//To use the right objects every frame, we need to keep track of the current frame.
+	uint32_t currentFrame = 0;
 
 	//Main funcitions for Run()
 	void initWindows();
@@ -149,7 +156,7 @@ private:
 
 	void createCommandPool();
 
-	void createCommandBuffer();
+	void createCommandBuffers();
 
 	void createSyncObjects();
 
@@ -259,7 +266,4 @@ private:
 	*		Because we re-record the command buffer every frame, we cannot record the next frame's work to the command buffer until the current frame has finished executing, as we don't want to overwrite the current contents of the command buffer while the GPU is using it.
 	* 
 	*/
-
-
-
 };

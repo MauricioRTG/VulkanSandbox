@@ -34,7 +34,7 @@ void VKApplication::initVulkan() {
 	createGraphicsPipeline();
 	createFramebuffers();
 	createCommandPool();
-	createCommandBuffer();
+	createCommandBuffers();
 	createSyncObjects();
 }
 
@@ -51,9 +51,11 @@ void VKApplication::mainLoop() {
 }
 
 void VKApplication::cleanup() {
-	vkDestroySemaphore(logicalDevice, renderFinishedSemaphore, nullptr);
-	vkDestroySemaphore(logicalDevice, imageAvailableSemaphore, nullptr);
-	vkDestroyFence(logicalDevice, inFlightFence, nullptr);
+	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+		vkDestroySemaphore(logicalDevice, renderFinishedSemaphores[i], nullptr);
+		vkDestroySemaphore(logicalDevice, imageAvailableSemaphores[i], nullptr);
+		vkDestroyFence(logicalDevice, inFlightFences[i], nullptr);
+	}
 
 	vkDestroyCommandPool(logicalDevice, commandPool, nullptr);
 
@@ -695,7 +697,10 @@ void VKApplication::createCommandPool(){
 	}
 }
 
-void VKApplication::createCommandBuffer(){
+void VKApplication::createCommandBuffers(){
+
+	//Resize command buffers array to the desired in flight frames
+	commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
 
 	//Specifies the command pool and number of buffers to allocate:
 	VkCommandBufferAllocateInfo allocInfo{};
@@ -705,14 +710,20 @@ void VKApplication::createCommandBuffer(){
 	//- VK_COMMAND_BUFFER_LEVEL_PRIMARY: Can be submitted to a queue for execution, but cannot be called from other command buffers.
 	//- VK_COMMAND_BUFFER_LEVEL_SECONDARY: Cannot be submitted directly, but can be called from primary command buffers.
 	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-	allocInfo.commandBufferCount = 1;
 
-	if (vkAllocateCommandBuffers(logicalDevice, &allocInfo, &commandBuffer) != VK_SUCCESS) {
+	allocInfo.commandBufferCount = (uint32_t) commandBuffers.size();
+
+	if (vkAllocateCommandBuffers(logicalDevice, &allocInfo, commandBuffers.data()) != VK_SUCCESS) {
 		throw std::runtime_error("Failed to allocate command buffers!");
 	}
 }
 
 void VKApplication::createSyncObjects(){
+	//Resize syncronization vectors for desired in flight frames
+	imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+	renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+	inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+
 	VkSemaphoreCreateInfo semaphoreInfo{};
 	semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
@@ -722,11 +733,13 @@ void VKApplication::createSyncObjects(){
 	//reate the fence in the signaled state, so that the first call to vkWaitForFences() returns immediately since the fence is already signaled.
 	fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-	//Create semaphores and fence
-	if (vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &imageAvailableSemaphore) != VK_SUCCESS ||
-		vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &renderFinishedSemaphore) != VK_SUCCESS ||
-		vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFence) != VK_SUCCESS) {
-		throw std::runtime_error("Failed to create semaphores or fence!");
+	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+		//Create semaphores and fence
+		if (vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &imageAvailableSemaphores[i]) != VK_SUCCESS ||
+			vkCreateSemaphore(logicalDevice, &semaphoreInfo, nullptr, &renderFinishedSemaphores[i]) != VK_SUCCESS ||
+			vkCreateFence(logicalDevice, &fenceInfo, nullptr, &inFlightFences[i]) != VK_SUCCESS) {
+			throw std::runtime_error("failed to create synchronization objects for a frame!");
+		}
 	}
 }
 
@@ -1062,15 +1075,23 @@ void VKApplication::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
 }
 
 void VKApplication::drawFrame(){
-	// Waiting for the previous frame
+	// We were required to wait on the previous frame to finish before we can start submitting the next which results in unnecessary idling of the host.
+	//The way to fix this is to allow multiple frames to be in-flight at once, that is to say, allow the rendering of one frame to not interfere with the recording of the next. 
+	//How do we do this? Any resource that is accessed and modified during rendering must be duplicated (command buffers, semaphores, and fences)
+	// Benefints: The CPU can continue recording and submitting new frames without waiting for the GPU to finish executing previous ones.
+	// Does It Matter If the CPU Submits a New Frame Before the Previous One Finishes? No, it doesn’t matter, because:
+	// - When the CPU submits a command buffer using vkQueueSubmit(), it doesn’t execute immediately. Instead, it gets queued in the GPU's command queue (FIFO).
+	// - Even if the CPU submits a new frame's command buffer quickly, the GPU won’t execute it until previous submissions are finished
+	// - Synchronization objects (semaphores, fences) control execution order and prevent resource conflicts.
+	//What this allows is to reduce the time the CPU is idle by briging some of the work foward to the GPU, previously we had to wait for the GPU to finish excuting before starting submitting a new command buffer to the queue 
 	
-	//takes an array of fences and waits on the host for either any or all of the fences to be signaled before returning. 
+	//Takes an array of fences and waits on the host for either any or all of the fences to be signaled before returning. 
 	// - The VK_TRUE we pass here indicates that we want to wait for all fences, but in the case of a single one it doesn't matter.
 	// - This function also has a timeout parameter that we set to the maximum value of a 64 bit unsigned integer, UINT64_MAX, which effectively disables the timeout.
-	vkWaitForFences(logicalDevice, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
+	vkWaitForFences(logicalDevice, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
 
 	//After waiting, we need to manually reset the fence to the unsignaled state
-	vkResetFences(logicalDevice, 1, &inFlightFence);
+	vkResetFences(logicalDevice, 1, &inFlightFences[currentFrame]);
 
 	// Acquiring an image for the swap chain
 
@@ -1079,22 +1100,22 @@ void VKApplication::drawFrame(){
 	// The next two parameters specify synchronization objects that are to be signaled when the presentation engine is finished using the image. That's the point in time where we can start drawing to it. 
 	//The last parameter specifies a variable to output the index of the swap chain image that has become available.
 	//The index refers to the VkImage in our swapChainImages array. We're going to use that index to pick the VkFrameBuffer.
-	vkAcquireNextImageKHR(logicalDevice, swapChain, UINT64_MAX, imageAvailableSemaphore, VK_NULL_HANDLE, &imageIndex);
+	vkAcquireNextImageKHR(logicalDevice, swapChain, UINT64_MAX, imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
 
 	// Recording the command buffer
 
 	//Makes sure the command buffer is able to be recorded
 	//The second parameter of vkResetCommandBuffer is a VkCommandBufferResetFlagBits flag. Since we don't want to do anything special, we leave it as 0.
-	vkResetCommandBuffer(commandBuffer, 0);
+	vkResetCommandBuffer(commandBuffers[currentFrame], 0);
 	
 	//Record commands to command buffer
-	recordCommandBuffer(commandBuffer, imageIndex);
+	recordCommandBuffer(commandBuffers[currentFrame], imageIndex);
 
 	// Submitting the command buffer in queue
 	VkSubmitInfo submitInfo{};
 	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-	VkSemaphore waitSemaphores[] = { imageAvailableSemaphore };
+	VkSemaphore waitSemaphores[] = { imageAvailableSemaphores[currentFrame]};
 	VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
 	//The first three parameters specify which semaphores to wait on before execution begins and in which stage(s) of the pipeline to wait. 
 	//We want to wait with writing colors to the image until it's available, so we're specifying the stage of the graphics pipeline that writes to the color attachment. 
@@ -1103,10 +1124,10 @@ void VKApplication::drawFrame(){
 	submitInfo.pWaitDstStageMask = waitStages;
 	//The next two parameters specify which command buffers to actually submit for execution.
 	submitInfo.commandBufferCount = 1;
-	submitInfo.pCommandBuffers = &commandBuffer;
+	submitInfo.pCommandBuffers = &commandBuffers[currentFrame];
 	// The signalSemaphoreCount and pSignalSemaphores parameters specify which semaphores to signal once the command buffer(s) have finished execution. 
 	//In our case we're using the renderFinishedSemaphore for that purpose.
-	VkSemaphore signalSemaphores[] = { renderFinishedSemaphore };
+	VkSemaphore signalSemaphores[] = { renderFinishedSemaphores[currentFrame]};
 	submitInfo.signalSemaphoreCount = 1;
 	submitInfo.pSignalSemaphores = signalSemaphores;
 
@@ -1114,7 +1135,7 @@ void VKApplication::drawFrame(){
 	//The last parameter references an optional fence that will be signaled when the command buffers finish execution.
 	// This allows us to know when it is safe for the command buffer to be reused
 	// Now on the next frame, the CPU will wait for this command buffer to finish executing before it records new commands into it.
-	if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFence) != VK_SUCCESS) {
+	if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]) != VK_SUCCESS) {
 		throw std::runtime_error("Failed to submit draw command buffer!");
 	}
 
@@ -1137,4 +1158,7 @@ void VKApplication::drawFrame(){
 
 	//Submit the request to present an image to the swap chain
 	vkQueuePresentKHR(presentQueue, &presentInfo);
+
+	//Advance to the next frame every time
+	currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT; //By using the modulo (%) operator, we ensure that the frame index loops around after every MAX_FRAMES_IN_FLIGHT enqueued frames.
 }
