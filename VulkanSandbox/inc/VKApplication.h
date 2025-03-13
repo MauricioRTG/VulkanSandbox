@@ -3,7 +3,10 @@
 #include <iostream>
 #include <vulkan/vulkan.h>
 #include <vector>
+#include <array>
 #include <optional>
+#include <glm/vec4.hpp>
+#include <glm/mat4x4.hpp>
 //For Surface
 #include <GLFW/glfw3.h>
 #include <GLFW/glfw3native.h>
@@ -35,6 +38,60 @@ const bool enableValidationLayers = false;
 #else
 const bool enableValidationLayers = true;
 #endif
+
+//New structure called Vertex with the two attributes that we're going to use in the vertex shader
+struct Vertex {
+	glm::vec2 pos;
+	glm::vec3 color;
+
+	static VkVertexInputBindingDescription getBindingDescription() {
+		//All of our per-vertex data is packed together in one array, so we're only going to have one binding. 
+		VkVertexInputBindingDescription bindingDescription{};
+		bindingDescription.binding = 0;//The binding parameter specifies the index of the binding in the array of bindings. 
+		bindingDescription.stride = sizeof(Vertex);// Specifies the number of bytes from one entry to the next
+		//VK_VERTEX_INPUT_RATE_VERTEX: Move to the next data entry after each vertex
+		//K_VERTEX_INPUT_RATE_INSTANCE: Move to the next data entry after each instance
+		bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+		return bindingDescription;
+	}
+
+	static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescription() {
+		std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+		
+		//Position
+		//The binding is loading one Vertex at a time and the position attribute (pos) is at an offset of 0 bytes from the beginning of this struct
+		attributeDescriptions[0].binding = 0;//The binding parameter tells Vulkan from which binding the per-vertex data comes.
+		attributeDescriptions[0].location = 0;//The location parameter references the location directive of the input in the vertex shader. The input in the vertex shader with location 0 is the position, which has two 32-bit float components.
+		//The following shader types and formats are commonly used together:
+		//float: VK_FORMAT_R32_SFLOAT
+		//vec2: VK_FORMAT_R32G32_SFLOAT
+		//vec3: VK_FORMAT_R32G32B32_SFLOAT
+		//vec4: VK_FORMAT_R32G32B32A32_SFLOAT
+		//The color type (SFLOAT, UINT, SINT) and bit width should also match the type of the shader input. See the following examples:
+		//ivec2: VK_FORMAT_R32G32_SINT, a 2-component vector of 32-bit signed integers
+		//uvec4: VK_FORMAT_R32G32B32A32_UINT, a 4-component vector of 32-bit unsigned integers
+		//double: VK_FORMAT_R64_SFLOAT, a double-precision (64-bit) float
+		attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;//The format parameter describes the type of data for the attribute. Specified using the same enumeration as color formats. Implicitly defines the byte size of attribute data 
+		attributeDescriptions[0].offset = offsetof(Vertex, pos);//Specifies the number of bytes since the start of the per-vertex data to read from.
+
+		//Color
+		attributeDescriptions[1].binding = 0;
+		attributeDescriptions[1].location = 1;
+		attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+		attributeDescriptions[1].offset = offsetof(Vertex, color);
+
+		return attributeDescriptions;
+	}
+};
+
+//Array of vertex data
+//We're using exactly the same position and color values as before, but now they're combined into one array of vertices. This is known as interleaving vertex attributes.
+const std::vector<Vertex> vertices = {
+	{{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+	{{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
+	{{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+};
 
 //Stores indices for different queue types
 struct QueueFamilyIndices {
