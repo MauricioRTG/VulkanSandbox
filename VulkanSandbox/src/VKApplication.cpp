@@ -35,6 +35,7 @@ void VKApplication::initVulkan() {
 	createGraphicsPipeline();
 	createFramebuffers();
 	createCommandPool();
+	createVertexBuffer();
 	createCommandBuffers();
 	createSyncObjects();
 }
@@ -53,6 +54,9 @@ void VKApplication::mainLoop() {
 
 void VKApplication::cleanup() {
 	cleanupSwapChain();
+
+	vkDestroyBuffer(logicalDevice, vertexBuffer, nullptr);
+	vkFreeMemory(logicalDevice, vertexBufferMemory, nullptr);
 
 	vkDestroyPipeline(logicalDevice, graphicsPipeline, nullptr);
 	vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
@@ -696,6 +700,68 @@ void VKApplication::createCommandPool(){
 	}
 }
 
+void VKApplication::createVertexBuffer(){
+	// Create vertex Buffer
+	VkBufferCreateInfo bufferInfo{};
+	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	bufferInfo.size = sizeof(vertices[0]) * vertices.size();//Specifies the size of the buffer in bytes
+	bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;//Indicates for which purposes the data in the buffer is going to be used. It is possible to specify multiple purposes using a bitwise or. 
+	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;//Just like the images in the swap chain, buffers can also be owned by a specific queue family or be shared between multiple at the same time. The buffer will only be used from the graphics queue, so we can stick to exclusive access.
+
+	if (vkCreateBuffer(logicalDevice, &bufferInfo, nullptr, &vertexBuffer) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create vertex buffer!");
+	}
+
+	//Buffer has been created, but it doesn't actually have any memory assigned to it yet. First step of allocating memory:
+
+	// Query Memory Requirements
+
+	//The VkMemoryRequirements struct has three fields:
+	//size: The size of the required amount of memory in bytes, may differ from bufferInfo.size.
+	//alignment: The offset in bytes where the buffer begins in the allocated region of memory, depends on bufferInfo.usage and bufferInfo.flags.
+	//memoryTypeBits: Bit field of the memory types that are suitable for the buffer.
+	VkMemoryRequirements memRequirements;
+	vkGetBufferMemoryRequirements(logicalDevice, vertexBuffer, &memRequirements);
+
+	// Allocate Vertex Buffer Memory
+
+	//Graphics cards can offer different types of memory to allocate from. Each type of memory varies in terms of allowed operations and performance characteristics. We need to combine the requirements of the buffer and our own application requirements to find the right type of memory to use
+	//Memory allocation is now as simple as specifying the size and type, both of which are derived from the memory requirements of the vertex buffer and the desired property.
+	VkMemoryAllocateInfo allocInfo{};
+	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	allocInfo.allocationSize = memRequirements.size;
+	allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+
+	if (vkAllocateMemory(logicalDevice, &allocInfo, nullptr, &vertexBufferMemory) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to allocate vertex buffer memory!");
+	}
+
+	// Associate this memory with the buffer
+	//Since this memory is allocated specifically for this the vertex buffer, the offset is simply 0. If the offset is non-zero, then it is required to be divisible by memRequirements.alignment.
+	vkBindBufferMemory(logicalDevice, vertexBuffer, vertexBufferMemory, 0);
+
+	// Filling the vertex buffer
+
+	//It is now time to copy the vertex data to the buffer. This is done by mapping the buffer memory into CPU accessible memory with vkMapMemory.
+	//This function allows us to access a region of the specified memory resource defined by an offset and size.
+	//It is also possible to specify the special value VK_WHOLE_SIZE to map all of the memory.
+	void* data; //CPU accessible memory to the GPU memory we allocated
+	vkMapMemory(logicalDevice, vertexBufferMemory, 0, bufferInfo.size, 0, &data);
+
+	//You can now simply memcpy the vertex data to the mapped memory
+	memcpy(data, vertices.data(), (size_t)bufferInfo.size);
+
+	vkUnmapMemory(logicalDevice, vertexBufferMemory);
+
+
+	//Unfortunately the driver may not immediately copy the data into the buffer memory, for example because of caching. It is also possible that writes to the buffer are not visible in the mapped memory yet. 
+	// - Use a memory heap that is host coherent, indicated with VK_MEMORY_PROPERTY_HOST_COHERENT_BIT (we used this when finding a memory type)
+	// - Call vkFlushMappedMemoryRanges after writing to the mapped memory, and call vkInvalidateMappedMemoryRanges before reading from the mapped memory
+
+	//Flushing memory ranges or using a coherent memory heap means that the driver will be aware of our writes to the buffer, but it doesn't mean that they are actually visible on the GPU yet.
+	//The transfer of data to the GPU is an operation that happens in the background and the specification simply tells us that it is guaranteed to be complete as of the next call to vkQueueSubmit.
+}
+
 void VKApplication::createCommandBuffers(){
 
 	//Resize command buffers array to the desired in flight frames
@@ -1055,12 +1121,17 @@ void VKApplication::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
 	scissor.extent = swapChainExtent;
 	vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
+	// Bind vertex buffer to command buffer
+	VkBuffer vertexBuffers[] = { vertexBuffer };
+	VkDeviceSize offsets[] = { 0 };
+	vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+
 	//Draw command
-	//vertexCount: Even though we don't have a vertex buffer, we technically still have 3 vertices to draw.
+	//vertexCount: size of vertexBuffer
 	//instanceCount: Used for instanced rendering, use 1 if you're not doing that.
 	//firstVertex : Used as an offset into the vertex buffer, defines the lowest value of gl_VertexIndex.
 	//firstInstance : Used as an offset for instanced rendering, defines the lowest value of gl_InstanceIndex.
-	vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+	vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
 
 	// End render pass
 
@@ -1223,4 +1294,23 @@ void VKApplication::framebufferResizeCallback(GLFWwindow* window, int width, int
 	auto app = reinterpret_cast<VKApplication*>(glfwGetWindowUserPointer(window));
 	//Set flag
 	app->framebufferrResized = true;
+}
+
+uint32_t VKApplication::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const
+{
+	//Query info about the available types of memory in physical device
+	VkPhysicalDeviceMemoryProperties memProperties;
+	vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
+
+	//Find memory type that is suitable for the buffer 
+	//We can find the index of a suitable memory type by simply iterating over them and checking if the corresponding bit is set to 1.
+	//The properties define special features of the memory, like being able to map it so we can write to it from the CPU. 
+	for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+		//Check for memory type support and if the memoery type support the desired properties
+		if ((typeFilter & (1 << i)) && (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+			return i;
+		}
+	}
+	
+	throw std::runtime_error("Failed to find suitable memory type!");
 }

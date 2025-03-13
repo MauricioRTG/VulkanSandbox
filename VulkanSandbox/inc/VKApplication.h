@@ -89,7 +89,7 @@ struct Vertex {
 //We're using exactly the same position and color values as before, but now they're combined into one array of vertices. This is known as interleaving vertex attributes.
 const std::vector<Vertex> vertices = {
 	{{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-	{{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
+	{{0.5f, 0.5f},  {1.0f, 0.5f, 0.0f}},
 	{{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
 };
 
@@ -186,6 +186,12 @@ private:
 	//To use the right objects every frame, we need to keep track of the current frame.
 	uint32_t currentFrame = 0;
 
+	//Vertex Buffer Handle
+	VkBuffer vertexBuffer;
+
+	//Allocated Memory for vertex buffer in GPU
+	VkDeviceMemory vertexBufferMemory;
+
 	//Main funcitions for Run()
 	void initWindows();
 
@@ -216,6 +222,8 @@ private:
 	void createFramebuffers();
 
 	void createCommandPool();
+
+	void createVertexBuffer();
 
 	void createCommandBuffers();
 
@@ -340,4 +348,9 @@ private:
 	//Resize window callback
 	//Set the frambufferResized flag
 	static void framebufferResizeCallback(GLFWwindow* window, int width, int height);
+
+	//Vertex Buffer Creation
+
+	//Graphics cards can offer different types of memory to allocate from. Each type of memory varies in terms of allowed operations and performance characteristics. We need to combine the requirements of the buffer and our own application requirements to find the right type of memory to use
+	uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const;
 };
