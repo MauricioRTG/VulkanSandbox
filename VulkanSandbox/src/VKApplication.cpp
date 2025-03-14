@@ -701,58 +701,26 @@ void VKApplication::createCommandPool(){
 }
 
 void VKApplication::createVertexBuffer(){
-	// Create vertex Buffer
-	VkBufferCreateInfo bufferInfo{};
-	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	bufferInfo.size = sizeof(vertices[0]) * vertices.size();//Specifies the size of the buffer in bytes
-	bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;//Indicates for which purposes the data in the buffer is going to be used. It is possible to specify multiple purposes using a bitwise or. 
-	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;//Just like the images in the swap chain, buffers can also be owned by a specific queue family or be shared between multiple at the same time. The buffer will only be used from the graphics queue, so we can stick to exclusive access.
 
-	if (vkCreateBuffer(logicalDevice, &bufferInfo, nullptr, &vertexBuffer) != VK_SUCCESS) {
-		throw std::runtime_error("Failed to create vertex buffer!");
-	}
+	VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
+	// Create the staging Buffer (Host-Visible Memory in RAM)
+	//A staging buffer allows you to upload data in a single batch and then efficiently transfer it to device-local memory (VRAM in GPU), minimizing PCIe traffic.
+	VkBuffer stagingBuffer;
+	VkDeviceMemory stagingBufferMemory;
+	createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
 
-	//Buffer has been created, but it doesn't actually have any memory assigned to it yet. First step of allocating memory:
-
-	// Query Memory Requirements
-
-	//The VkMemoryRequirements struct has three fields:
-	//size: The size of the required amount of memory in bytes, may differ from bufferInfo.size.
-	//alignment: The offset in bytes where the buffer begins in the allocated region of memory, depends on bufferInfo.usage and bufferInfo.flags.
-	//memoryTypeBits: Bit field of the memory types that are suitable for the buffer.
-	VkMemoryRequirements memRequirements;
-	vkGetBufferMemoryRequirements(logicalDevice, vertexBuffer, &memRequirements);
-
-	// Allocate Vertex Buffer Memory
-
-	//Graphics cards can offer different types of memory to allocate from. Each type of memory varies in terms of allowed operations and performance characteristics. We need to combine the requirements of the buffer and our own application requirements to find the right type of memory to use
-	//Memory allocation is now as simple as specifying the size and type, both of which are derived from the memory requirements of the vertex buffer and the desired property.
-	VkMemoryAllocateInfo allocInfo{};
-	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-	allocInfo.allocationSize = memRequirements.size;
-	allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-
-	if (vkAllocateMemory(logicalDevice, &allocInfo, nullptr, &vertexBufferMemory) != VK_SUCCESS) {
-		throw std::runtime_error("Failed to allocate vertex buffer memory!");
-	}
-
-	// Associate this memory with the buffer
-	//Since this memory is allocated specifically for this the vertex buffer, the offset is simply 0. If the offset is non-zero, then it is required to be divisible by memRequirements.alignment.
-	vkBindBufferMemory(logicalDevice, vertexBuffer, vertexBufferMemory, 0);
-
-	// Filling the vertex buffer
+	// Filling the staging buffer
 
 	//It is now time to copy the vertex data to the buffer. This is done by mapping the buffer memory into CPU accessible memory with vkMapMemory.
 	//This function allows us to access a region of the specified memory resource defined by an offset and size.
 	//It is also possible to specify the special value VK_WHOLE_SIZE to map all of the memory.
-	void* data; //CPU accessible memory to the GPU memory we allocated
-	vkMapMemory(logicalDevice, vertexBufferMemory, 0, bufferInfo.size, 0, &data);
+	void* data; //CPU accessible memory (Host-visible memory in RAM)
+	vkMapMemory(logicalDevice, stagingBufferMemory, 0, bufferSize, 0, &data);
 
 	//You can now simply memcpy the vertex data to the mapped memory
-	memcpy(data, vertices.data(), (size_t)bufferInfo.size);
+	memcpy(data, vertices.data(), (size_t)bufferSize);
 
-	vkUnmapMemory(logicalDevice, vertexBufferMemory);
-
+	vkUnmapMemory(logicalDevice, stagingBufferMemory);
 
 	//Unfortunately the driver may not immediately copy the data into the buffer memory, for example because of caching. It is also possible that writes to the buffer are not visible in the mapped memory yet. 
 	// - Use a memory heap that is host coherent, indicated with VK_MEMORY_PROPERTY_HOST_COHERENT_BIT (we used this when finding a memory type)
@@ -760,6 +728,18 @@ void VKApplication::createVertexBuffer(){
 
 	//Flushing memory ranges or using a coherent memory heap means that the driver will be aware of our writes to the buffer, but it doesn't mean that they are actually visible on the GPU yet.
 	//The transfer of data to the GPU is an operation that happens in the background and the specification simply tells us that it is guaranteed to be complete as of the next call to vkQueueSubmit.
+
+	// Create vertex buffer using device local memory
+
+	createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer, vertexBufferMemory);
+
+
+	//Copy Staging buffer [Host-Visible] content to Vertex buffer [device local]
+	copyBuffer(stagingBuffer, vertexBuffer, bufferSize);
+
+	//After copying the data from the staging buffer to the device buffer, we clean up staging buffer and staging  buffer memory
+	vkDestroyBuffer(logicalDevice, stagingBuffer, nullptr);
+	vkFreeMemory(logicalDevice, stagingBufferMemory, nullptr);
 }
 
 void VKApplication::createCommandBuffers(){
@@ -1313,4 +1293,101 @@ uint32_t VKApplication::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlag
 	}
 	
 	throw std::runtime_error("Failed to find suitable memory type!");
+}
+
+void VKApplication::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory){
+	// Create vertex Buffer
+	VkBufferCreateInfo bufferInfo{};
+	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	bufferInfo.size = size;//Specifies the size of the buffer in bytes
+	bufferInfo.usage = usage;//Indicates for which purposes the data in the buffer is going to be used. It is possible to specify multiple purposes using a bitwise or.
+	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;//Just like the images in the swap chain, buffers can also be owned by a specific queue family or be shared between multiple at the same time. The buffer will only be used from the graphics queue, so we can stick to exclusive access.
+
+	if (vkCreateBuffer(logicalDevice, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create buffer!");
+	}
+
+	//Buffer has been created, but it doesn't actually have any memory assigned to it yet. First step of allocating memory:
+
+	// Query Memory Requirements
+
+	//The VkMemoryRequirements struct has three fields:
+	//size: The size of the required amount of memory in bytes, may differ from bufferInfo.size.
+	//alignment: The offset in bytes where the buffer begins in the allocated region of memory, depends on bufferInfo.usage and bufferInfo.flags.
+	VkMemoryRequirements memRequirements;
+	vkGetBufferMemoryRequirements(logicalDevice, buffer, &memRequirements);
+
+	// Allocate Vertex Buffer Memory
+
+	//Graphics cards can offer different types of memory to allocate from. Each type of memory varies in terms of allowed operations and performance characteristics. We need to combine the requirements of the buffer and our own application requirements to find the right type of memory to use
+	//Memory allocation is now as simple as specifying the size and type, both of which are derived from the memory requirements of the vertex buffer and the desired property.
+	VkMemoryAllocateInfo allocInfo{};
+	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	allocInfo.allocationSize = memRequirements.size;
+	allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties);
+
+	if (vkAllocateMemory(logicalDevice, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
+		throw std::runtime_error("failed to allocate buffer memory!");
+	}
+
+	// Associate this memory with the buffer
+	//Since this memory is allocated specifically for this the vertex buffer, the offset is simply 0. If the offset is non-zero, then it is required to be divisible by memRequirements.alignment.
+	vkBindBufferMemory(logicalDevice, buffer, bufferMemory, 0);
+}
+
+void VKApplication::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
+{
+	// Allocate temporary commadn buffer to execute memory transfer operations
+	
+	//TODO Optimization: You may wish to create a separate command pool for these kinds of short-lived buffers, because the implementation may be able to apply memory allocation optimizations. You should use the VK_COMMAND_POOL_CREATE_TRANSIENT_BIT flag during command pool generation in that case.
+
+	VkCommandBufferAllocateInfo allocInfo{};
+	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocInfo.commandPool = commandPool;
+	allocInfo.commandBufferCount = 1;
+
+	VkCommandBuffer commandBuffer;
+	vkAllocateCommandBuffers(logicalDevice, &allocInfo, &commandBuffer);
+
+	// Start Recording buffer
+
+	//We're only going to use the command buffer once and wait with returning from the function until the copy operation has finished executing
+	// It's good practice to tell the driver about our intent using VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT.
+	VkCommandBufferBeginInfo beginInfo{};
+	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+	vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+	// Transfer content of src buffer to dst buffer command
+
+	//It is not possible to specify VK_WHOLE_SIZE here, unlike the vkMapMemory command.
+	VkBufferCopy copyRegion{};
+	copyRegion.srcOffset = 0;
+	copyRegion.dstOffset = 0;
+	copyRegion.size = size;
+	vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
+
+	//End Recording Buffer
+	vkEndCommandBuffer(commandBuffer);
+
+	// Submit command buffer for exceution
+	VkSubmitInfo submitInfo{};
+	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	submitInfo.commandBufferCount = 1;
+	submitInfo.pCommandBuffers = &commandBuffer;
+
+	// The buffer copy command requires a queue family that supports transfer operations, which is indicated using VK_QUEUE_TRANSFER_BIT
+	//The good news is that any queue family with VK_QUEUE_GRAPHICS_BIT or VK_QUEUE_COMPUTE_BIT capabilities already implicitly support VK_QUEUE_TRANSFER_BIT operations.
+	//he implementation is not required to explicitly list it in queueFlags in those cases.
+	vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+	//Unlike the draw commands, there are no events we need to wait on this time. We just want to execute the transfer on the buffers immediately. 
+	// There are again two possible ways to wait on this transfer to complete:
+	// - We could use a fence and wait with vkWaitForFences (A fence would allow you to schedule multiple transfers simultaneously and wait for all of them complete, instead of executing one at a time.)
+	// - Simply wait for the transfer queue to become idle with vkQueueWaitIdle
+	vkQueueWaitIdle(graphicsQueue);
+	
+	// Clean up the command buffer used for the transfer operation.
+	vkFreeCommandBuffers(logicalDevice, commandPool, 1, &commandBuffer);
 }
