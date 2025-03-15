@@ -36,6 +36,7 @@ void VKApplication::initVulkan() {
 	createFramebuffers();
 	createCommandPool();
 	createVertexBuffer();
+	createIndexBuffer();
 	createCommandBuffers();
 	createSyncObjects();
 }
@@ -54,6 +55,9 @@ void VKApplication::mainLoop() {
 
 void VKApplication::cleanup() {
 	cleanupSwapChain();
+
+	vkDestroyBuffer(logicalDevice, indexBuffer, nullptr);
+	vkFreeMemory(logicalDevice, indexBufferMemory, nullptr);
 
 	vkDestroyBuffer(logicalDevice, vertexBuffer, nullptr);
 	vkFreeMemory(logicalDevice, vertexBufferMemory, nullptr);
@@ -742,6 +746,33 @@ void VKApplication::createVertexBuffer(){
 	vkFreeMemory(logicalDevice, stagingBufferMemory, nullptr);
 }
 
+void VKApplication::createIndexBuffer(){
+
+	//Same as creating a vertex buffer
+	VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+
+	//Create staging buffer (Host-visible) copy indices array into
+	VkBuffer stagingBuffer;
+	VkDeviceMemory stagingBufferMemory;
+	createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+	//Copy indices array content into stagin buffer
+	void* data;
+	vkMapMemory(logicalDevice, stagingBufferMemory, 0, bufferSize, 0, &data);
+	memcpy(data, indices.data(), (size_t)bufferSize);
+	vkUnmapMemory(logicalDevice, stagingBufferMemory);
+
+	//Create index buffer, destination where we transfer the content of the staging buffer
+	createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer, indexBufferMemory);
+
+	//Copy content from staging buffer (Host-visible in RAM) to indexBuffer in (device local VRAM in GPU)
+	copyBuffer(stagingBuffer, indexBuffer, bufferSize);
+
+	//Cleanup temp staging buffer used for transfer
+	vkDestroyBuffer(logicalDevice, stagingBuffer, nullptr);
+	vkFreeMemory(logicalDevice, stagingBufferMemory, nullptr);
+}
+
 void VKApplication::createCommandBuffers(){
 
 	//Resize command buffers array to the desired in flight frames
@@ -1106,12 +1137,16 @@ void VKApplication::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
 	VkDeviceSize offsets[] = { 0 };
 	vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
-	//Draw command
+	// Bind index buffer to command buffer
+	vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+
+	//Draw Indexed command
 	//vertexCount: size of vertexBuffer
 	//instanceCount: Used for instanced rendering, use 1 if you're not doing that.
-	//firstVertex : Used as an offset into the vertex buffer, defines the lowest value of gl_VertexIndex.
+	//firstIndex : Used as an offset into the index buffer, defines the lowest value of gl_VertexIndex.
+	//vertexOffset :offset to add to the indices in the index buffer.
 	//firstInstance : Used as an offset for instanced rendering, defines the lowest value of gl_InstanceIndex.
-	vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+	vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
 	// End render pass
 
@@ -1223,8 +1258,8 @@ void VKApplication::drawFrame(){
 
 	//Recreate Swap chain if current is no longer compatible
 	//It is important to check framebufferResized this after vkQueuePresentKHR to ensure that the semaphores are in a consistent state, otherwise a signaled semaphore may never be properly waited upon.
-	if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferrResized) {
-		framebufferrResized = false;
+	if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
+		framebufferResized = false;
 		recreateSwapChain();
 	}
 	else if (result != VK_SUCCESS) {
@@ -1273,11 +1308,10 @@ void VKApplication::framebufferResizeCallback(GLFWwindow* window, int width, int
 	//Get pointer for vulkan application instance
 	auto app = reinterpret_cast<VKApplication*>(glfwGetWindowUserPointer(window));
 	//Set flag
-	app->framebufferrResized = true;
+	app->framebufferResized = true;
 }
 
-uint32_t VKApplication::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const
-{
+uint32_t VKApplication::findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties) const{
 	//Query info about the available types of memory in physical device
 	VkPhysicalDeviceMemoryProperties memProperties;
 	vkGetPhysicalDeviceMemoryProperties(physicalDevice, &memProperties);
@@ -1335,8 +1369,7 @@ void VKApplication::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, Vk
 	vkBindBufferMemory(logicalDevice, buffer, bufferMemory, 0);
 }
 
-void VKApplication::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
-{
+void VKApplication::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size){
 	// Allocate temporary commadn buffer to execute memory transfer operations
 	
 	//TODO Optimization: You may wish to create a separate command pool for these kinds of short-lived buffers, because the implementation may be able to apply memory allocation optimizations. You should use the VK_COMMAND_POOL_CREATE_TRANSIENT_BIT flag during command pool generation in that case.

@@ -88,9 +88,17 @@ struct Vertex {
 //Array of vertex data
 //We're using exactly the same position and color values as before, but now they're combined into one array of vertices. This is known as interleaving vertex attributes.
 const std::vector<Vertex> vertices = {
-	{{0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-	{{0.5f, 0.5f},  {1.0f, 0.5f, 0.0f}},
-	{{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+	{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+	{{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
+	{{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
+	{{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
+};
+
+//Array of index data
+//It is possible to use either uint16_t or uint32_t for your index buffer depending on the number of entries in vertices
+//uint16_t: 65535 unique vertices
+const std::vector<uint16_t> indices = {
+	0, 1, 2, 2, 3, 0
 };
 
 //Stores indices for different queue types
@@ -181,7 +189,7 @@ private:
 
 	//Handling resizes explicitly
 	//Although many drivers and platforms trigger VK_ERROR_OUT_OF_DATE_KHR automatically after a window resize, it is not guaranteed to happen.
-	bool framebufferrResized = false;
+	bool framebufferResized = false;
 
 	//To use the right objects every frame, we need to keep track of the current frame.
 	uint32_t currentFrame = 0;
@@ -189,8 +197,15 @@ private:
 	//Vertex Buffer Handle
 	VkBuffer vertexBuffer;
 
-	//Allocated Memory for vertex buffer in GPU
+	//Allocated Memory for vertex buffer
 	VkDeviceMemory vertexBufferMemory;
+
+	//An index buffer is essentially an array of pointers into the vertex buffer.
+	// It allows you to reorder the vertex data, and reuse existing data for multiple vertices
+	VkBuffer indexBuffer;
+
+	//Alocated Memory for the index buffer
+	VkDeviceMemory indexBufferMemory;
 
 	//Main funcitions for Run()
 	void initWindows();
@@ -224,6 +239,8 @@ private:
 	void createCommandPool();
 
 	void createVertexBuffer();
+
+	void createIndexBuffer();
 
 	void createCommandBuffers();
 
