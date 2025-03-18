@@ -744,6 +744,47 @@ void VKApplication::createCommandPool(){
 	}
 }
 
+void VKApplication::createTextureImage(){
+	//Load an image and upload it into a Vulkan image object.
+
+	// Load image
+	int texWidth, texHeight, texChannels;
+	//The STBI_rgb_alpha value forces the image to be loaded with an alpha channel, even if it doesn't have one
+	stbi_uc* pixels = stbi_load("textures/lion-2.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+	//The pixels are laid out row by row with 4 bytes per pixel in the case of STBI_rgb_alpha for a total of texWidth * texHeight * 4 values.
+	VkDeviceSize imageSize = texWidth * texHeight * 4;
+
+	if (!pixels) {
+		throw std::runtime_error("Failed to load texture image!");
+	}
+
+	// Staging buffer
+	VkBuffer stagingBuffer;
+	VkDeviceMemory stagingBufferMemory;
+
+	//The buffer should be in host visible memory so that we can map it and it should be usable as a transfer source so that we can copy it to an image later on:
+	createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+	// Copy the pixel values that we got from the image loading library to the buffer:
+	void* data;
+	vkMapMemory(logicalDevice, stagingBufferMemory, 0, imageSize, 0, &data);
+	memcpy(data, pixels, static_cast<size_t>(imageSize));
+	vkUnmapMemory(logicalDevice, stagingBufferMemory);
+
+	//clean up the original pixel array
+	stbi_image_free(pixels);
+
+	//Create Image
+	createImage(
+		texWidth, 
+		texHeight, 
+		VK_FORMAT_R8G8B8A8_SRGB, 
+		VK_IMAGE_TILING_OPTIMAL, 
+		VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, 
+		VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 
+		textureImage, 
+		textureImageMemory);
+}
+
 void VKApplication::createVertexBuffer(){
 
 	VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
@@ -833,6 +874,9 @@ void VKApplication::createUniformBuffers(){
 		//The buffer stays mapped to this pointer for the application's whole lifetime. This technique is called "persistent mapping" and works on all Vulkan implementations.
 		//Not having to map the buffer every time we need to update it increases performances, as mapping is not free.
 		vkMapMemory(logicalDevice, uniformBuffersMemory[i], 0, bufferSize, 0, &uniformBuffersMapped[i]);
+
+		//Instead of manually allocating memory for uniform buffers, many implementations use Vulkan descriptor sets to manage uniform buffer memory implicitly.
+		//vkAllocateDescriptorSets() and vkUpdateDescriptorSets() handle memory assignment and binding
 	}
 }
 
@@ -869,6 +913,8 @@ void VKApplication::createDescriptorSets(){
 	allocInfo.descriptorPool = descriptorPool;
 	allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT); //In our case we will create one descriptor set for each frame in flight, all with the same layout.
 	allocInfo.pSetLayouts = layouts.data();
+
+	//Allocate memory for descriptor set
 
 	descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
 	if (vkAllocateDescriptorSets(logicalDevice, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
@@ -1604,4 +1650,63 @@ void VKApplication::updateUniformBuffer(uint32_t currentImage){
 
 	//Copy the data in the uniform buffer object to the current uniform buffer.
 	memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
+}
+
+void VKApplication::createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory){
+	//Create Info for Image we are going to feel with data from the staging buffer
+	VkImageCreateInfo imageInfo{};
+	imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	//Image type, ells Vulkan with what kind of coordinate system the texels in the image are going to be addressed. It is possible to create 1D, 2D and 3D images.
+	//1D: One dimensional images can be used to store an array of data or gradient
+	//2D: mainly used for textures
+	//3D: can be used to store voxel volumes
+	imageInfo.imageType = VK_IMAGE_TYPE_2D;
+	//The extent field specifies the dimensions of the image, basically how many texels there are on each axis
+	//That's why depth must be 1 instead of 0
+	imageInfo.extent.width = width;
+	imageInfo.extent.height = height;
+	imageInfo.extent.depth = 1; //Means there is no depth component 
+	imageInfo.mipLevels = 1;
+	imageInfo.arrayLayers = 1;
+	imageInfo.format = format;//use the same format for the texels as the pixels in the buffer
+	//VK_IMAGE_TILING_LINEAR: Texels are laid out in row-major order like our pixels array
+	//VK_IMAGE_TILING_OPTIMAL: Texels are laid out in an implementation defined order for optimal access
+	//Unlike the layout of an image, the tiling mode cannot be changed at a later time. If you want to be able to directly access texels in the memory of the image, then you must use VK_IMAGE_TILING_LINEAR. We will be using a staging buffer instead of a staging image, so this won't be necessary. We will be using VK_IMAGE_TILING_OPTIMAL for efficient access from the shader.
+	imageInfo.tiling = tiling;
+	//VK_IMAGE_LAYOUT_UNDEFINED: Not usable by the GPU and the very first transition will discard the texels.
+	//VK_IMAGE_LAYOUT_PREINITIALIZED: Not usable by the GPU, but the first transition will preserve the texels.
+	//There are few situations where it is necessary for the texels to be preserved during the first transition. One example, however, would be if you wanted to use an image as a staging image in combination with the VK_IMAGE_TILING_LINEAR layout. In that case, you'd want to upload the texel data to it and then transition the image to be a transfer source without losing the data.
+	//In our case, however, we're first going to transition the image to be a transfer destination and then copy texel data to it from a buffer object, so we don't need this property and can safely use VK_IMAGE_LAYOUT_UNDEFINED.
+	imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	//The image is going to be used as destination for the buffer copy, so it should be set up as a transfer destination
+	//We also want to be able to access the image from the shader to color our mesh, so the usage should include VK_IMAGE_USAGE_SAMPLED_BIT
+	imageInfo.usage = usage;
+	imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;//The image will only be used by one queue family: the one that supports graphics (and therefore also) transfer operations.
+	//The samples flag is related to multisampling. This is only relevant for images that will be used as attachments
+	imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+	imageInfo.flags = 0; // Optional: Sparse images are images where only certain regions are actually backed by memory. If you were using a 3D texture for a voxel terrain, for example, then you could use this to avoid allocating memory to store large volumes of "air" values. 
+
+	//Create Image
+	if (vkCreateImage(logicalDevice, &imageInfo, nullptr, &image) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create image!");
+	}
+
+	//Get memory requrments for image
+	//Allocating memory for an image works in exactly the same way as allocating memory for a buffer. Use vkGetImageMemoryRequirements instead of vkGetBufferMemoryRequirements
+	VkMemoryRequirements memRequirements;
+	vkGetImageMemoryRequirements(logicalDevice, image, &memRequirements);
+
+	//Allocation info
+	VkMemoryAllocateInfo allocInfo{};
+	allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	allocInfo.allocationSize = memRequirements.size;
+	allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties);
+
+	//Allocate memory for image
+	if (vkAllocateMemory(logicalDevice, &allocInfo, nullptr, &imageMemory) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to allocate image memory!");
+	}
+
+	//Bind image memory with textureImage
+	vkBindImageMemory(logicalDevice, image, imageMemory, 0);
 }

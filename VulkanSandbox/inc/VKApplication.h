@@ -21,6 +21,10 @@
 //For model view proj matrix
 #define GLM_FORCE_RADIANS
 
+//Load an image library
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
+
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 
@@ -259,6 +263,10 @@ private:
 	//Descriptor set: descriptor set for each VkBuffer resource to bind it to the uniform buffer descriptor.
 	std::vector<VkDescriptorSet> descriptorSets;
 
+	// Texture
+	VkImage textureImage;// Image object to fill with texture pixels
+	VkDeviceMemory textureImageMemory; // Allocated memory in GPU device local
+
 	//Main funcitions for Run()
 	void initWindows();
 
@@ -291,6 +299,8 @@ private:
 	void createFramebuffers();
 
 	void createCommandPool();
+
+	void createTextureImage();
 
 	void createVertexBuffer();
 
@@ -440,4 +450,7 @@ private:
 
 	//Generates a new transformation every frame to make the geometry spin around.
 	void updateUniformBuffer(uint32_t currentImage);
+
+	//Texture images
+	void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
 };
