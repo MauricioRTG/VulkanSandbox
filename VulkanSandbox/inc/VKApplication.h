@@ -88,6 +88,26 @@ struct Vertex {
 	}
 };
 
+/*
+* Alignment Requirments
+* 
+* Vulkan expects the data in your structure to be aligned in memory in a specific way, for example:
+* - Scalars have to be aligned by N (= 4 bytes given 32 bit floats).
+* - A vec2 must be aligned by 2N (= 8 bytes) (two floats of 4 bytes)
+* - A vec3 (3 flosts) or vec4 (4 floats which is 16 bytes) must be aligned by 4N (= 16 bytes)
+* - A nested structure must be aligned by the base alignment of its members rounded up to a multiple of 16.
+* - A mat4 matrix must have the same alignment as a vec4.
+* 
+* A 16 bytes allignment means that the memory address of that varaible should be multiple of 16
+* model has an offset of 0, view has an offset of 64 and proj has an offset of 128. All of these are multiples of 16 
+* 
+* if the new structure start with,The new structure starts with a vec2 which is only 8 bytes in size and therefore throws off all of the offsets.
+* Now model has an offset of 8, view an offset of 72 and proj an offset of 136, none of which are multiples of 16.
+* 
+* For allign requirements automatically but, generally is better to do it manually, because nested structures doen't work using this
+* #define GLM_FORCE_DEFAULT_ALIGNED_GENTYPES
+*/
+
 //Descriptor 
 //A descriptor is a way for shaders to freely access resources like buffers and images. 
 //We're going to set up a buffer that contains the transformation matrices and have the vertex shader access them through a descriptor
@@ -96,9 +116,9 @@ struct Vertex {
 // - Allocate a descriptor set from a descriptor pool
 // - Bind the descriptor set during rendering
 struct UniformBufferObject {
-	glm::mat4 model;
-	glm::mat4 view;
-	glm::mat4 proj;
+	alignas(16) glm::mat4 model;
+	alignas(16) glm::mat4 view;
+	alignas(16) glm::mat4 proj;
 };
 
 //Array of vertex data
@@ -180,6 +200,7 @@ private:
 
 	//Descriptor Set Layout: Provides details about every descriptor binding used in the shaders for pipeline creation, just like we had to do for every vertex attribute and its location index
 	// The descriptor layout specifies the types of resources that are going to be accessed by the pipeline, just like a render pass specifies the types of attachments that will be accessed. 
+	// Describes the type of descriptors that can be bound
 	VkDescriptorSetLayout descriptorSetLayout;
 
 	//Pipeline layout
@@ -232,6 +253,12 @@ private:
 	std::vector<VkDeviceMemory> uniformBuffersMemory;//Allocated memory for vertex buffer
 	std::vector<void*> uniformBuffersMapped;// CPU access meomory to write data to
 
+	// Descriptor Pool Handle: describe which descriptor types our descriptor sets are going to contain and how many of them
+	VkDescriptorPool descriptorPool;
+
+	//Descriptor set: descriptor set for each VkBuffer resource to bind it to the uniform buffer descriptor.
+	std::vector<VkDescriptorSet> descriptorSets;
+
 	//Main funcitions for Run()
 	void initWindows();
 
@@ -270,6 +297,10 @@ private:
 	void createIndexBuffer();
 
 	void createUniformBuffers();
+
+	void createDescriptorPool();
+
+	void createDescriptorSets();
 
 	void createCommandBuffers();
 

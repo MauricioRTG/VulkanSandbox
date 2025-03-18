@@ -42,6 +42,8 @@ void VKApplication::initVulkan() {
 	createVertexBuffer();
 	createIndexBuffer();
 	createUniformBuffers();
+	createDescriptorPool();
+	createDescriptorSets();
 	createCommandBuffers();
 	createSyncObjects();
 }
@@ -69,6 +71,8 @@ void VKApplication::cleanup() {
 		vkDestroyBuffer(logicalDevice, uniformBuffers[i], nullptr);
 		vkFreeMemory(logicalDevice, uniformBuffersMemory[i], nullptr);
 	}
+
+	vkDestroyDescriptorPool(logicalDevice, descriptorPool, nullptr);
 
 	vkDestroyDescriptorSetLayout(logicalDevice, descriptorSetLayout, nullptr);
 
@@ -476,7 +480,6 @@ void VKApplication::createDescriptorSetLayout(){
 	if (vkCreateDescriptorSetLayout(logicalDevice, &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS) {
 		throw std::runtime_error("Failed to create descriptor set layout!");
 	}
-
 }
 
 void VKApplication::createGraphicsPipeline(){
@@ -495,7 +498,7 @@ void VKApplication::createGraphicsPipeline(){
 	vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 	vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
 	vertShaderStageInfo.module = vertShaderModule;
-	vertShaderStageInfo.pName = "main"; //Entypoint of shader
+	vertShaderStageInfo.pName = "main"; //Entrypoint of shader
 
 	//Fragment shader stage
 	VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
@@ -562,8 +565,9 @@ void VKApplication::createGraphicsPipeline(){
 	//VK_POLYGON_MODE_LINE : polygon edges are drawn as lines
 	//VK_POLYGON_MODE_POINT : polygon vertices are drawn as points
 	rasterizer.lineWidth = 1.0f;//escribes the thickness of lines in terms of number of fragments. The maximum line width that is supported depends on the hardware and any line thicker than 1.0f requires you to enable the wideLines GPU feature.
+	//because of the Y-flip we did in the projection matrix, the vertices are now being drawn in counter-clockwise order instead of clockwise order. This causes backface culling to kick in and prevents any geometry from being drawn.
 	rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;// The cullMode variable determines the type of face culling to use. You can disable culling, cull the front faces, cull the back faces or both.
-	rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;// The frontFace variable specifies the vertex order for faces to be considered front-facing and can be clockwise or counterclockwise.
+	rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;// The frontFace variable specifies the vertex order for faces to be considered front-facing and can be clockwise or counterclockwise.
 	rasterizer.depthBiasEnable = VK_FALSE;
 	//The rasterizer can alter the depth values by adding a constant value or biasing them based on a fragment's slope. 
 	rasterizer.depthBiasConstantFactor = 0.0f; // Optional
@@ -645,7 +649,7 @@ void VKApplication::createGraphicsPipeline(){
 	VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
 	pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 	//Descriptor sets are used to bind resources(textures, buffers, etc.) to shaders
-	pipelineLayoutInfo.setLayoutCount = 0; //means that no descriptor sets are used in this pipeline. 
+	pipelineLayoutInfo.setLayoutCount = 1; //means that no descriptor sets are used in this pipeline. 
 	pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;//descriptor set layouts.
 	//Push constants are small amounts of data that can be passed directly to shaders.
 	pipelineLayoutInfo.pushConstantRangeCount = 0; //no push constants are used
@@ -829,6 +833,70 @@ void VKApplication::createUniformBuffers(){
 		//The buffer stays mapped to this pointer for the application's whole lifetime. This technique is called "persistent mapping" and works on all Vulkan implementations.
 		//Not having to map the buffer every time we need to update it increases performances, as mapping is not free.
 		vkMapMemory(logicalDevice, uniformBuffersMemory[i], 0, bufferSize, 0, &uniformBuffersMapped[i]);
+	}
+}
+
+void VKApplication::createDescriptorPool(){
+	//Descriptor sets can't be created directly, they must be allocated from a pool like command buffers
+
+	// Describe which descriptor types our descriptor sets are going to contain and how many of them
+	VkDescriptorPoolSize poolSize{};
+	poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	poolSize.descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);// We will allocate one of these descriptors for every frame.
+	
+	//Create info
+	VkDescriptorPoolCreateInfo poolInfo{};
+	poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	poolInfo.poolSizeCount = 1;
+	poolInfo.pPoolSizes = &poolSize;
+	//Aside from the maximum number of individual descriptors that are available, we also need to specify the maximum number of descriptor sets that may be allocated:
+	poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
+
+	// Create Descriptor Pool
+	if (vkCreateDescriptorPool(logicalDevice, &poolInfo, nullptr, &descriptorPool) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create descriptor pool!");
+	}
+}
+
+void VKApplication::createDescriptorSets(){
+	// Create Info
+	//You need to specify the descriptor pool to allocate from
+	//The number of descriptor sets to allocate
+	//The descriptor layout to base them on
+	std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, descriptorSetLayout);
+	VkDescriptorSetAllocateInfo allocInfo{};
+	allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	allocInfo.descriptorPool = descriptorPool;
+	allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT); //In our case we will create one descriptor set for each frame in flight, all with the same layout.
+	allocInfo.pSetLayouts = layouts.data();
+
+	descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+	if (vkAllocateDescriptorSets(logicalDevice, &allocInfo, descriptorSets.data()) != VK_SUCCESS) {
+		throw std::runtime_error("failed to allocate descriptor sets!");
+	}
+
+	//Note: You don't need to explicitly clean up descriptor sets, because they will be automatically freed when the descriptor pool is destroyed.
+
+	//The descriptor sets have been allocated now, but the descriptors within still need to be configured. We'll now add a loop to populate every descriptor
+	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+		// This structure specifies the buffer and the region within it that contains the data for the descriptor
+		VkDescriptorBufferInfo bufferInfo{};
+		bufferInfo.buffer = uniformBuffers[i]; //VkBuffer we want to bind to descriptor set
+		bufferInfo.offset = 0;
+		bufferInfo.range = sizeof(UniformBufferObject);
+
+		//The configuration of descriptors is updated using the vkUpdateDescriptorSets function, which takes an array of VkWriteDescriptorSet structs as parameter.
+		VkWriteDescriptorSet descriptorWrite{};
+		descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+		descriptorWrite.dstSet = descriptorSets[i];
+		descriptorWrite.dstBinding = 0; //We gave our uniform buffer binding index 0
+		descriptorWrite.dstArrayElement = 0;//Remember that descriptors can be arrays, so we also need to specify the first index in the array that we want to update. We're not using an array, so the index is simply 0.
+		descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+		descriptorWrite.descriptorCount = 1; //The descriptorCount field specifies how many array elements you want to update.
+		descriptorWrite.pBufferInfo = &bufferInfo; //Our descriptor is based on buffers, so we're using pBufferInfo.
+
+		//t accepts two kinds of arrays as parameters: an array of VkWriteDescriptorSet and an array of VkCopyDescriptorSet. The latter can be used to copy descriptors to each other, as its name implies.
+		vkUpdateDescriptorSets(logicalDevice, 1, &descriptorWrite, 0, nullptr);
 	}
 }
 
@@ -1199,6 +1267,9 @@ void VKApplication::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
 	// Bind index buffer to command buffer
 	vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
 
+	//Bind the right descriptor set for each frame to the descriptors in the shader
+	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);
+
 	//Draw Indexed command
 	//vertexCount: size of vertexBuffer
 	//instanceCount: Used for instanced rendering, use 1 if you're not doing that.
@@ -1525,6 +1596,7 @@ void VKApplication::updateUniformBuffer(uint32_t currentImage){
 	//Second parameter: sets the aspect ratio which is calculated by dividing the swapChainExtent's width by its height.
 	//Third and fourth parameter: sets the near and far plane of the frustum (All the vertices between the near and far plane and inside the frustum will be rendered0
 	//We usually set the near distance to 0.1 and the far distance to 100.0. 
+	//The rectangle has changed into a square because the projection matrix now corrects for aspect ratio takes care of screen resizing.
 	ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f);
 
 	//GLM was originally designed for OpenGL, where the Y coordinate of the clip coordinates is inverted. The easiest way to compensate for that is to flip the sign on the scaling factor of the Y axis in the projection matrix.
