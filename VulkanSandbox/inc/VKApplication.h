@@ -18,6 +18,9 @@
 #define GLFW_EXPOSE_NATIVE_WIN32
 #define VK_USE_PLATFORM_WIN32_KHR
 
+//For model view proj matrix
+#define GLM_FORCE_RADIANS
+
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 
@@ -83,6 +86,19 @@ struct Vertex {
 
 		return attributeDescriptions;
 	}
+};
+
+//Descriptor 
+//A descriptor is a way for shaders to freely access resources like buffers and images. 
+//We're going to set up a buffer that contains the transformation matrices and have the vertex shader access them through a descriptor
+//Usage of descriptors consists of three parts:
+// - Specify a descriptor layout during pipeline creation
+// - Allocate a descriptor set from a descriptor pool
+// - Bind the descriptor set during rendering
+struct UniformBufferObject {
+	glm::mat4 model;
+	glm::mat4 view;
+	glm::mat4 proj;
 };
 
 //Array of vertex data
@@ -162,6 +178,10 @@ private:
 	//Render pass: Specifies how many color and depth buffers there will be, how many samples to use for each of them and how their contents should be handled throughout the rendering operations. 
 	VkRenderPass renderPass;
 
+	//Descriptor Set Layout: Provides details about every descriptor binding used in the shaders for pipeline creation, just like we had to do for every vertex attribute and its location index
+	// The descriptor layout specifies the types of resources that are going to be accessed by the pipeline, just like a render pass specifies the types of attachments that will be accessed. 
+	VkDescriptorSetLayout descriptorSetLayout;
+
 	//Pipeline layout
 	VkPipelineLayout pipelineLayout;
 
@@ -207,6 +227,11 @@ private:
 	//Alocated Memory for the index buffer
 	VkDeviceMemory indexBufferMemory;
 
+	//Uniform Buffers
+	std::vector<VkBuffer> uniformBuffers; //Buffer objects
+	std::vector<VkDeviceMemory> uniformBuffersMemory;//Allocated memory for vertex buffer
+	std::vector<void*> uniformBuffersMapped;// CPU access meomory to write data to
+
 	//Main funcitions for Run()
 	void initWindows();
 
@@ -232,6 +257,8 @@ private:
  
 	void createRenderPass();
 
+	void createDescriptorSetLayout();
+
 	void createGraphicsPipeline();
 
 	void createFramebuffers();
@@ -241,6 +268,8 @@ private:
 	void createVertexBuffer();
 
 	void createIndexBuffer();
+
+	void createUniformBuffers();
 
 	void createCommandBuffers();
 
@@ -375,4 +404,9 @@ private:
 
 	//Copy the contents from one buffer to another (e.g from a Staging buffer [Host-Visible] to a Vertex buffer [device local])
 	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
+
+	// Update uniform buffer
+
+	//Generates a new transformation every frame to make the geometry spin around.
+	void updateUniformBuffer(uint32_t currentImage);
 };

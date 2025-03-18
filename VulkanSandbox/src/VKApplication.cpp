@@ -2,6 +2,9 @@
 #include <set>
 #include <algorithm>
 #include <fstream>
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <chrono>
 
 void VKApplication::run() {
 	initWindows();
@@ -32,11 +35,13 @@ void VKApplication::initVulkan() {
 	createSwapChain();
 	createImageViews();
 	createRenderPass();
+	createDescriptorSetLayout();
 	createGraphicsPipeline();
 	createFramebuffers();
 	createCommandPool();
 	createVertexBuffer();
 	createIndexBuffer();
+	createUniformBuffers();
 	createCommandBuffers();
 	createSyncObjects();
 }
@@ -56,16 +61,22 @@ void VKApplication::mainLoop() {
 void VKApplication::cleanup() {
 	cleanupSwapChain();
 
+	vkDestroyPipeline(logicalDevice, graphicsPipeline, nullptr);
+	vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
+	vkDestroyRenderPass(logicalDevice, renderPass, nullptr);
+
+	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+		vkDestroyBuffer(logicalDevice, uniformBuffers[i], nullptr);
+		vkFreeMemory(logicalDevice, uniformBuffersMemory[i], nullptr);
+	}
+
+	vkDestroyDescriptorSetLayout(logicalDevice, descriptorSetLayout, nullptr);
+
 	vkDestroyBuffer(logicalDevice, indexBuffer, nullptr);
 	vkFreeMemory(logicalDevice, indexBufferMemory, nullptr);
 
 	vkDestroyBuffer(logicalDevice, vertexBuffer, nullptr);
 	vkFreeMemory(logicalDevice, vertexBufferMemory, nullptr);
-
-	vkDestroyPipeline(logicalDevice, graphicsPipeline, nullptr);
-	vkDestroyPipelineLayout(logicalDevice, pipelineLayout, nullptr);
-
-	vkDestroyRenderPass(logicalDevice, renderPass, nullptr);
 
 	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 		vkDestroySemaphore(logicalDevice, renderFinishedSemaphores[i], nullptr);
@@ -443,6 +454,31 @@ void VKApplication::createRenderPass(){
 	}
 }
 
+void VKApplication::createDescriptorSetLayout(){
+	//Provide details about every descriptor binding used in the shaders for pipeline creation, just like we had to do for every vertex attribute and its location index
+
+	// Descriptor Set Layout Bindings 
+
+	//Binding for the model, view, proj uniform variable in shader
+	VkDescriptorSetLayoutBinding uboLayoutBinding{};
+	uboLayoutBinding.binding = 0;
+	uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	uboLayoutBinding.descriptorCount = 1;// It is possible for the shader variable to represent an array of uniform buffer objects, and descriptorCount specifies the number of values in the array.
+	uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	uboLayoutBinding.pImmutableSamplers = nullptr;
+
+	//Create Info for layout
+	VkDescriptorSetLayoutCreateInfo layoutInfo{};
+	layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	layoutInfo.bindingCount = 1;//Number of bindings
+	layoutInfo.pBindings = &uboLayoutBinding;
+
+	if (vkCreateDescriptorSetLayout(logicalDevice, &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create descriptor set layout!");
+	}
+
+}
+
 void VKApplication::createGraphicsPipeline(){
 	//Read shader SPIR-V Files
 	auto vertShaderCode = readFile("shaders/vert.spv");
@@ -610,7 +646,7 @@ void VKApplication::createGraphicsPipeline(){
 	pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 	//Descriptor sets are used to bind resources(textures, buffers, etc.) to shaders
 	pipelineLayoutInfo.setLayoutCount = 0; //means that no descriptor sets are used in this pipeline. 
-	pipelineLayoutInfo.pSetLayouts = nullptr;// means there's no descriptor set layout.
+	pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;//descriptor set layouts.
 	//Push constants are small amounts of data that can be passed directly to shaders.
 	pipelineLayoutInfo.pushConstantRangeCount = 0; //no push constants are used
 	pipelineLayoutInfo.pPushConstantRanges = nullptr;
@@ -771,6 +807,29 @@ void VKApplication::createIndexBuffer(){
 	//Cleanup temp staging buffer used for transfer
 	vkDestroyBuffer(logicalDevice, stagingBuffer, nullptr);
 	vkFreeMemory(logicalDevice, stagingBufferMemory, nullptr);
+}
+
+void VKApplication::createUniformBuffers(){
+	//We're going to copy new data to the uniform buffer every frame, so it doesn't really make any sense to have a staging buffer. It would just add extra overhead .
+
+	VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+
+	//We should have multiple buffers, because multiple frames may be in flight at the same time and we don't want to update the buffer in preparation of the next frame while a previous one is still reading from it!
+	//We need to have as many uniform buffers as we have frames in flight, and write to a uniform buffer that is not currently being read by the GPU
+	uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+	uniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
+	uniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
+
+	for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+		//Create buffer
+		createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, uniformBuffers[i], uniformBuffersMemory[i]);
+
+		//Map pointer to access in CPU the uniform buffer memory 
+		//We map the buffer right after creation using vkMapMemory to get a pointer to which we can write the data later on. 
+		//The buffer stays mapped to this pointer for the application's whole lifetime. This technique is called "persistent mapping" and works on all Vulkan implementations.
+		//Not having to map the buffer every time we need to update it increases performances, as mapping is not free.
+		vkMapMemory(logicalDevice, uniformBuffersMemory[i], 0, bufferSize, 0, &uniformBuffersMapped[i]);
+	}
 }
 
 void VKApplication::createCommandBuffers(){
@@ -1195,6 +1254,9 @@ void VKApplication::drawFrame(){
 		throw std::runtime_error("Failed to acquire swap chain image!");
 	}
 
+	//Generate a new transformation every frame to make the geometry spin around
+	updateUniformBuffer(currentFrame);
+
 	//After waiting, we need to manually reset the fence to the unsignaled state
 	//Delay resetting the fence until after we know for sure we will be submitting work with it. Thus, if we return early, the fence is still signaled and vkWaitForFences wont deadlock the next time we use the same fence object.
 	vkResetFences(logicalDevice, 1, &inFlightFences[currentFrame]);
@@ -1423,4 +1485,51 @@ void VKApplication::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceS
 	
 	// Clean up the command buffer used for the transfer operation.
 	vkFreeCommandBuffers(logicalDevice, commandPool, 1, &commandBuffer);
+}
+
+void VKApplication::updateUniformBuffer(uint32_t currentImage){
+	// This make sure that the geometry rotates 90 degrees per second regardless of frame rate
+	static auto startTime = std::chrono::high_resolution_clock::now(); //It remains the same across multiple function calls due to the static keyword
+	
+	auto currentTime = std::chrono::high_resolution_clock::now();
+	//currentTime - startTime:  produces a duration object representing the time difference.
+	//std::chrono::duration<float, std::chrono::seconds::period>: converts the duration into seconds as a float.
+	//.count(): extracts the actual numerical value.
+	float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+	//Update model view and proj
+	UniformBufferObject ubo{};
+
+	//The model rotation will be a simple rotation around the Z-axis using the time variable:
+
+	// Model: Transform object coordinates from local to world space
+	//The glm::rotate function takes an existing transformation, rotation angle and rotation axis as parameters.
+	//The glm::mat4(1.0f) constructor returns an identity matrix. 
+	//Using a rotation angle of time * glm::radians(90.0f) accomplishes the purpose of rotation 90 degrees per second.
+	ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+	
+	// View: from world space to view space (camera view)
+	//View/Camera looks at at the geometry from above at a 45 degree angle
+	// First parameter: positoin of the camera in world space
+	// Second parameter: Target position, the positon the camera is looking (in this case the world origin)
+	// Third parameter: Up vector, defines which direction is condered "up" in the world. In this case, (0,0,1) means the positive Z-axis is up.
+	ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+
+	// Projection: from view space to clip-space
+	//The projection matrix then converts coordinates within this specified range to normalized device coordinates (-1.0, 1.0) (not directly, a step called Perspective Division sits in between). 
+	//All coordinates outside this range will not be mapped between -1.0 and 1.0 and therefore be clipped.
+	//The projection matrix to transform view coordinates to clip coordinates usually takes two different forms, where each form defines its own unique frustum:
+	// - Orthographic: defines a cube-like frustum box that defines the clipping space where each vertex outside this box is clipped
+	// - Perspective: objects that are farther away appear much smaller
+	//First parameter: defines the fov value, that stands for field of view and sets how large the viewspace is (usually set to 45 degrees)
+	//Second parameter: sets the aspect ratio which is calculated by dividing the swapChainExtent's width by its height.
+	//Third and fourth parameter: sets the near and far plane of the frustum (All the vertices between the near and far plane and inside the frustum will be rendered0
+	//We usually set the near distance to 0.1 and the far distance to 100.0. 
+	ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f);
+
+	//GLM was originally designed for OpenGL, where the Y coordinate of the clip coordinates is inverted. The easiest way to compensate for that is to flip the sign on the scaling factor of the Y axis in the projection matrix.
+	ubo.proj[1][1] = ubo.proj[1][1] * -1;
+
+	//Copy the data in the uniform buffer object to the current uniform buffer.
+	memcpy(uniformBuffersMapped[currentImage], &ubo, sizeof(ubo));
 }
