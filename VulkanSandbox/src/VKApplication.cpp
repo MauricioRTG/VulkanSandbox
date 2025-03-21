@@ -43,6 +43,8 @@ void VKApplication::initVulkan() {
 	createFramebuffers();
 	createCommandPool();
 	createTextureImage();
+	createTextureImageView();
+	createTextureSampler();
 	createVertexBuffer();
 	createIndexBuffer();
 	createUniformBuffers();
@@ -77,6 +79,9 @@ void VKApplication::cleanup() {
 	}
 
 	vkDestroyDescriptorPool(logicalDevice, descriptorPool, nullptr);
+
+	vkDestroySampler(logicalDevice, textureSampler, nullptr);
+	vkDestroyImageView(logicalDevice, textureImageView, nullptr);
 
 	vkDestroyImage(logicalDevice, textureImage, nullptr);
 	vkFreeMemory(logicalDevice, textureImageMemory, nullptr);
@@ -233,7 +238,8 @@ void VKApplication::createLogicalDevice(){
 	* So from the available features from that physical device we select the ones we only want using this logical device (this way we can create multiple logical devices each with different features form the physical device)
 	*/
 
-	VkPhysicalDeviceFeatures deviceFeatures{}; //We leave everything to VK_FALSE
+	VkPhysicalDeviceFeatures deviceFeatures{}; 
+	deviceFeatures.samplerAnisotropy = VK_TRUE;
 
 	/* Creating the logical device */
 
@@ -346,28 +352,7 @@ void VKApplication::createImageViews()
 	//Iterate over all the swap chain images and create the images views with a creatInfo struct
 	for (size_t i = 0; i < swapChainImages.size(); i++)
 	{
-		VkImageViewCreateInfo createInfo{};
-		createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-		createInfo.image = swapChainImages[i];
-		createInfo.viewType = VK_IMAGE_VIEW_TYPE_2D; //he viewType parameter allows you to treat images as 1D textures, 2D textures, 3D textures and cube maps.
-		createInfo.format = swapChainImageFormat;
-		//The components field allows you to swizzle (i.e., rearrange)  the color channels around of an image view. For example, you can map all of the channels to the red channel for a monochrome texture (imageViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_R;  // Map red to blue). You can also map constant values of 0 and 1 to a channel. In our case we'll stick to the default mapping.
-		createInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY; // Keeps the original channel.
-		createInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-		createInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-		createInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-
-		//The subresourceRange field describes what the image's purpose is and which part of the image should be accessed. Our images will be used as color targets without any mipmapping levels or multiple layers.
-		createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		createInfo.subresourceRange.baseMipLevel = 0;
-		createInfo.subresourceRange.levelCount = 1;
-		createInfo.subresourceRange.baseArrayLayer = 0;
-		createInfo.subresourceRange.layerCount = 1;
-
-		//Create Image View
-		if (vkCreateImageView(logicalDevice, &createInfo, nullptr, &swapChainImageViews[i]) != VK_SUCCESS) {
-			throw std::runtime_error("Failed to create image view!");
-		}
+		swapChainImageViews[i] = createImageView(swapChainImages[i], swapChainImageFormat);
 	}
 }
 
@@ -806,6 +791,63 @@ void VKApplication::createTextureImage(){
 	vkFreeMemory(logicalDevice, stagingBufferMemory, nullptr);
 }
 
+void VKApplication::createTextureImageView(){
+	textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB);
+}
+
+void VKApplication::createTextureSampler(){
+	//Get physical device properties to get the limit for maxAnisotropy
+	VkPhysicalDeviceProperties properties{};
+	vkGetPhysicalDeviceProperties(physicalDevice, &properties);
+
+	//Configure sampler, specify all filters and transformation
+	VkSamplerCreateInfo samplerInfo{};
+	samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+	//The magFilter and minFilter fields specify how to interpolate texels that are magnified or minified.
+	//- Magnification concerns the oversampling
+	//- Minification concerns undersampling
+	//The choices are VK_FILTER_NEAREST and VK_FILTER_LINEAR
+	samplerInfo.magFilter = VK_FILTER_LINEAR;
+	samplerInfo.minFilter = VK_FILTER_LINEAR;
+
+	// Note that the axes are called U, V and W instead of X, Y and Z. This is a convention for texture space coordinates.
+	// - Repeat: Repeat the texture when going beyond the image dimensions.
+	// - Mirrored repeat (repeated mirrored images): Like repeat, but inverts the coordinates to mirror the image when going beyond the dimensions.
+	// - Clamp to edge (fills using the edges of texture): Take the color of the edge closest to the coordinate beyond the image dimensions.
+	// - Mirror clamp to edge: Like clamp to edge, but instead uses the edge opposite to the closest edge.
+	// - Clamp to border (not fill): Return a solid color when sampling beyond the dimensions of the image.
+
+	// The repeat mode is probably the most common mode, because it can be used to tile textures like floors and walls.
+	//We're not going to sample outside of the image so it deesn't matter what we chose
+	samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+	samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+
+	//Fixes texture turns into a blurry mess in the distance
+	samplerInfo.anisotropyEnable = VK_TRUE;
+	samplerInfo.maxAnisotropy = properties.limits.maxSamplerAnisotropy; // limits the amount of texel samples that can be used to calculate the final color.
+	samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK; //Specifies which color is returned when sampling beyond the image with clamp to border addressing mode. It is possible to return black, white or transparent in either float or int formats.
+	//Specifies which coordinate system you want to use to address texels in an image
+	// If this field is VK_TRUE, then you can simply use coordinates within the [0, texWidth) and [0, texHeight) range
+	// If it is VK_FALSE, then the texels are addressed using the [0, 1) range on all axes. Real-world applications almost always use normalized coordinates, because then it's possible to use textures of varying resolutions with the exact same coordinates.
+	samplerInfo.unnormalizedCoordinates = VK_FALSE; 
+	//If a comparison function is enabled, then texels will first be compared to a value, and the result of that comparison is used in filtering operations.
+	// This is mainly used for percentage-closer filtering on shadow maps.
+	samplerInfo.compareEnable = VK_FALSE;
+	samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+	//All of these fields apply to mipmapping (in this case we don't need it)
+	samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+	samplerInfo.mipLodBias = 0.0f;
+	samplerInfo.minLod = 0.0f;
+	samplerInfo.maxLod = 0.0f;
+
+	//Note the sampler does not reference a VkImage anywhere. The sampler is a distinct object that provides an interface to extract colors from a texture
+	// It can be applied to any image you want, whether it is 1D, 2D or 3D.
+	if (vkCreateSampler(logicalDevice, &samplerInfo, nullptr, &textureSampler) != VK_SUCCESS) {
+		throw std::runtime_error("Failed to create texture sampler!");
+	}
+}
+
 void VKApplication::createVertexBuffer(){
 
 	VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
@@ -1080,7 +1122,11 @@ bool VKApplication::isDeviceSuitable(VkPhysicalDevice device){
 		swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
 	}
 
-	return indices.isComplete() && extensionsSupported && swapChainAdequate;
+	//Get physical device supported features
+	VkPhysicalDeviceFeatures supportedFeatures;
+	vkGetPhysicalDeviceFeatures(device, &supportedFeatures);
+
+	return indices.isComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy;
 }
 
 QueueFamilyIndices VKApplication::findQueueFamilies(VkPhysicalDevice device) const {
@@ -1852,4 +1898,34 @@ void VKApplication::copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t w
 	);
 
 	endSingleTimeCommands(commandBuffer);
+}
+
+VkImageView VKApplication::createImageView(VkImage image, VkFormat format)
+{
+	VkImageViewCreateInfo viewInfo{};
+	viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	viewInfo.image = image;
+	viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;//The viewType parameter allows you to treat images as 1D textures, 2D textures, 3D textures and cube maps.
+	viewInfo.format = format;
+
+	//The components field allows you to swizzle (i.e., rearrange)  the color channels around of an image view. For example, you can map all of the channels to the red channel for a monochrome texture (imageViewCreateInfo.components.b = VK_COMPONENT_SWIZZLE_R;  // Map red to blue). You can also map constant values of 0 and 1 to a channel. In our case we'll stick to the default mapping.
+	viewInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY; // Keeps the original channel.
+	viewInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+	viewInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+	viewInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+
+	//The subresourceRange field describes what the image's purpose is and which part of the image should be accessed. Our images will be used as color targets without any mipmapping levels or multiple layers.
+	viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	viewInfo.subresourceRange.baseMipLevel = 0;
+	viewInfo.subresourceRange.levelCount = 1;
+	viewInfo.subresourceRange.baseArrayLayer = 0;
+	viewInfo.subresourceRange.layerCount = 1;
+
+	//Create Image View
+	VkImageView imageView;
+	if (vkCreateImageView(logicalDevice, &viewInfo, nullptr, &imageView) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create texture image view!");
+	}
+
+	return imageView;
 }

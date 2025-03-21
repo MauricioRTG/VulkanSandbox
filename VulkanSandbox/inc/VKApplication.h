@@ -260,8 +260,39 @@ private:
 	std::vector<VkDescriptorSet> descriptorSets;
 
 	// Texture
+	
+	//Adding a texture to our application will involve the following steps:
+	//- Create an image object backed by device memory
+	//- Fill it with pixels from an image file
+	//- Create an image sampler
+	//- Add a combined image sampler descriptor to sample colors from the texture
 	VkImage textureImage;// Image object to fill with texture pixels
 	VkDeviceMemory textureImageMemory; // Allocated memory in GPU device local
+
+	//  Sample an image: Texture Image View and Sampler
+
+	//Textures are usually accessed through samplers, which will apply filtering and transformations to compute the final color that is retrieved.
+	
+	//These filters are helpful to deal with problems like:
+	// Oversampling, you have more fragments than texels: 
+	// - No filtering: Consider a texture that is mapped to geometry with more fragments than texels. If you simply took the closest texel for the texture coordinate in each fragment, then you would get a pisxelated image
+	// - Filtring: If you combined the 4 closest texels through linear interpolation, then you would get a smoother result
+	// A sampler object automatically applies this filtering for you when reading a color from the texture.
+	// Undersampling, you have more texels than fragments:
+	//- No anisotropic filtering:  this will lead to artifacts when sampling high frequency patterns like a checkerboard texture at a sharp angle (texture turns into a blurry mess in the distance)
+	//- 16x anisotropic filtering: solution to the problem
+	// Anisotropic filtering is actually an optional device feature. We need to update the createLogicalDevice function to request it
+
+	// A sampler can also take care of transformations. It determines what happens when you try to read texels outside the image through its addressing mode.
+	// - Repeat: Repeat the texture when going beyond the image dimensions.
+	// - Mirrored repeat (repeated mirrored images): Like repeat, but inverts the coordinates to mirror the image when going beyond the dimensions.
+	// - Clamp to edge (fills using the edges of texture): Take the color of the edge closest to the coordinate beyond the image dimensions.
+	// - Mirror clamp to edge: Like clamp to edge, but instead uses the edge opposite to the closest edge.
+	// - Clamp to border (not fill): Return a solid color when sampling beyond the dimensions of the image.
+	// The repeat mode is probably the most common mode, because it can be used to tile textures like floors and walls.
+
+	VkImageView textureImageView;//Images are accessed through image views rather than directly.
+	VkSampler textureSampler; // Textures are usually accessed through samplers, which will apply filtering and transformations to compute the final color that is retrieved. the sampler does not reference a VkImage anywhere. The sampler is a distinct object that provides an interface to extract colors from a texture
 
 	//Main funcitions for Run()
 	void initWindows();
@@ -297,6 +328,10 @@ private:
 	void createCommandPool();
 
 	void createTextureImage();
+
+	void createTextureImageView();
+
+	void createTextureSampler();
 
 	void createVertexBuffer();
 
@@ -460,4 +495,8 @@ private:
 	void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
 
 	void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
+
+	// Sample an Image
+
+	VkImageView createImageView(VkImage image, VkFormat format);
 };
