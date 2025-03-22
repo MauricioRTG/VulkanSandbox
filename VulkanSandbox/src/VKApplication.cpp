@@ -386,6 +386,18 @@ void VKApplication::createRenderPass(){
 	//Finallayout: specifies the layout to automatically transition to when the render pass finishes.
 	colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; //We want the image to be ready for presentation using the swap chain after rendering
 
+	// Depth attachment
+	VkAttachmentDescription depthAttachment{};
+	depthAttachment.format = findDepthFormat();
+	depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT; //Just like the color buffer, we don't care about the previous depth contents
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; //Clear values at the start
+	depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE; //ontents of the framebuffer will be undefined after the rendering operation we dont need depth values in framebuffer after rendering has finished
+	depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+
 	//Subpasses and attachment references
 	
 	//A single redener pass can consist of multiple subpasses.
@@ -398,11 +410,18 @@ void VKApplication::createRenderPass(){
 	colorAttachmentRef.attachment = 0; //specifies which attachment to reference by its index in the attachment descriptions array.
 	colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; //specifies which layout we would like the attachment to have during a subpass that uses this reference. Vulkan will automatically transition the attachment to this layout when the subpass is started. We intend to use the attachment to function as a color buffer 
 
+	VkAttachmentReference depthAttachmentRef{};
+	depthAttachmentRef.attachment = 1;
+	depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+
 	//Subpass description
 	VkSubpassDescription subpass{};
 	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;//Vulkan may also support compute subpasses in the future, so we have to be explicit about this being a graphics subpass.
 	subpass.colorAttachmentCount = 1;
 	subpass.pColorAttachments = &colorAttachmentRef; //The index of the attachment in this array is directly referenced from the fragment shader with the layout(location = 0) out vec4 outColor directive!
+	//Add a reference to the depth attachment for the first (and only) subpass
+	subpass.pDepthStencilAttachment = &depthAttachmentRef;
 	//The following other types of attachments can be referenced by a subpass:
 	//pInputAttachments: Attachments that are read from a shader
 	//pResolveAttachments: Attachments used for multisampling color attachments
@@ -425,22 +444,30 @@ void VKApplication::createRenderPass(){
 	//The first two fields specify the indices of the dependency and the dependent subpass.
 	dependency.srcSubpass = VK_SUBPASS_EXTERNAL; //This refers to operations happening before the render pass starts (e.g., image acquisition by the swap chain).
 	dependency.dstSubpass = 0; // This refers to the first (and only) subpass, where the color attachment is written.
+
 	//The next two fields specify the operations to wait on and the stages in which these operations occur
 	//We need to wait for the swap chain to finish reading from the image before we can access it.
 	//This can be accomplished by waiting on the color attachment output stage itself.
-	dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; //This ensures the render pass waits until the swap chain finishes reading from the image.
-	dependency.srcAccessMask = 0; // No memory access needed before this
-	//The operations that should wait on this are in the color attachment stage and involve the writing of the color attachment. 
-	//These settings will prevent the transition from happening until it's actually necessary (and allowed): when we want to start writing colors to it.
-	dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT; //The color attachment write operations will only happen after the image is available.
-	dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT; // Ensures we can write safely
+	dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT; //(Stages to wait on where the operations occur) This ensures the render pass waits until the swap chain finishes reading from the image.
+	dependency.srcAccessMask = 0; //(Operation to wait on) No memory access needed before this
+	
+	//The operations that should wait on this are in the color attachment and early fragment stage and involve the writing of the color attachment and depth attachment. 
+	//These settings will prevent the transition from happening until it's actually necessary (and allowed): when we want to start writing colors or depth and stencil values to it.
+	dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT; // (Stages that wait for previous especified stages) The color attachment write operations will only happen after the image is available, the same for the depth attachment write operations unitl the depth image is available
+	dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT; // (Operations that wait for previous especified operations) Ensures we can write safely
+
+	//Note for what we did by including depth attahchment dependencies: 
+	// we need to extend our subpass dependencies to make sure that there is no conflict between the transitioning of the depth image and it being cleared as part of its load operation.
+	// The depth image is first accessed in the early fragment test pipeline stage and because we have a load operation that clears, we should specify the access mask for writes.
 
 	//Render Pass
-
+	
+	//Unlike color attachments, a subpass can only use a single depth (+stencil) attachment. It wouldn't really make any sense to do depth tests on multiple buffers.
+	std::array<VkAttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
 	VkRenderPassCreateInfo renderPassInfo{};
 	renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-	renderPassInfo.attachmentCount = 1;
-	renderPassInfo.pAttachments = &colorAttachment;
+	renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+	renderPassInfo.pAttachments = attachments.data();
 	renderPassInfo.subpassCount = 1;
 	renderPassInfo.pSubpasses = &subpass;
 	renderPassInfo.dependencyCount = 1;
