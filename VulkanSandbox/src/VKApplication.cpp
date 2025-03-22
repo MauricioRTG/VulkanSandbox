@@ -42,6 +42,7 @@ void VKApplication::initVulkan() {
 	createGraphicsPipeline();
 	createFramebuffers();
 	createCommandPool();
+	createDepthResources();
 	createTextureImage();
 	createTextureImageView();
 	createTextureSampler();
@@ -352,7 +353,7 @@ void VKApplication::createImageViews()
 	//Iterate over all the swap chain images and create the images views with a creatInfo struct
 	for (size_t i = 0; i < swapChainImages.size(); i++)
 	{
-		swapChainImageViews[i] = createImageView(swapChainImages[i], swapChainImageFormat);
+		swapChainImageViews[i] = createImageView(swapChainImages[i], swapChainImageFormat, VK_IMAGE_ASPECT_COLOR_BIT);
 	}
 }
 
@@ -744,6 +745,32 @@ void VKApplication::createCommandPool(){
 	}
 }
 
+void VKApplication::createDepthResources(){
+	//The depth image should have:
+	//- The same resolution as the color attachemnt, defined by the swap chain extent
+	//- An image usage appropriate for a depth attachment
+	//- Optimal tiling and device local memory
+	//- The format must contain a depth component (indicated by _D??_ in the VK_FORMAT_)
+
+	//Unlike the texture image, we don't necessarily need a specific format, because we won't be directly accessing the texels from the program
+	// It just needs to have a reasonable accuracy, at least 24 bits is common in real-world applications. There are several formats that fit this requirement:
+	// - VK_FORMAT_D32_SFLOAT: 32-bit float for depth
+	// - VK_FORMAT_D32_SFLOAT_S8_UINT: 32-bit signed float for depth and 8 bit stencil component
+	// - VK_FORMAT_D24_UNORM_S8_UINT: 24-bit float for depth and 8 bit stencil component
+	//The stencil component is used for stencil tests, which is an additional test that can be combined with depth testing. 
+
+	//Find supported depth format
+	VkFormat depthFormat = findDepthFormat();
+
+	//Create depth image
+	createImage(swapChainExtent.width, swapChainExtent.height, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage, depthImageMemory);
+
+	//Create depth image view
+	depthImageView = createImageView(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+
+	//Note: We don't need to map it or copy another image to it, because we're going to clear it at the start of the render pass like the color attachment.
+}
+
 void VKApplication::createTextureImage(){
 	//Load an image and upload it into a Vulkan image object.
 
@@ -800,7 +827,7 @@ void VKApplication::createTextureImage(){
 }
 
 void VKApplication::createTextureImageView(){
-	textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB);
+	textureImageView = createImageView(textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
 }
 
 void VKApplication::createTextureSampler(){
@@ -1937,7 +1964,7 @@ void VKApplication::copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t w
 	endSingleTimeCommands(commandBuffer);
 }
 
-VkImageView VKApplication::createImageView(VkImage image, VkFormat format)
+VkImageView VKApplication::createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags)
 {
 	VkImageViewCreateInfo viewInfo{};
 	viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -1952,7 +1979,7 @@ VkImageView VKApplication::createImageView(VkImage image, VkFormat format)
 	viewInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
 
 	//The subresourceRange field describes what the image's purpose is and which part of the image should be accessed. Our images will be used as color targets without any mipmapping levels or multiple layers.
-	viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	viewInfo.subresourceRange.aspectMask = aspectFlags;
 	viewInfo.subresourceRange.baseMipLevel = 0;
 	viewInfo.subresourceRange.levelCount = 1;
 	viewInfo.subresourceRange.baseArrayLayer = 0;
@@ -1965,4 +1992,41 @@ VkImageView VKApplication::createImageView(VkImage image, VkFormat format)
 	}
 
 	return imageView;
+}
+
+VkFormat VKApplication::findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features){
+	//The support of a format depends on the tiling mode and usage, so we must also include these as parameters
+	for (VkFormat format : candidates) {
+		//VkFormatProperties struct contains three fields:
+		// - linearTilingFeatures: Use cases that are supported with linear tiling
+		// - optimalTilingFeatures: Use cases that are supported with optimal tiling
+		// - bufferFeatures: Use cases that are supported for buffers
+		//Only the first two are relevant here, and the one we check depends on the tiling
+		VkFormatProperties props;
+		vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &props);
+
+		
+		// Cheks if props linear tiling features flags have the feature we want and the tiling is linear
+		if (tiling == VK_IMAGE_TILING_LINEAR && (props.linearTilingFeatures & features) == features) {
+			return format;
+		}
+		else if (tiling == VK_IMAGE_TILING_OPTIMAL && (props.linearTilingFeatures & features) == features) {
+			return format;
+		}
+	}
+	
+	throw std::runtime_error("failed to find supported format!");
+}
+
+VkFormat VKApplication::findDepthFormat(){
+	//Find supported format for depth
+	return findSupportedFormat(
+		{ VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT}, //All of these candidate formats contain a depth component, but the latter two also contain a stencil component.
+		VK_IMAGE_TILING_OPTIMAL,
+		VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT
+	);
+}
+
+bool VKApplication::hasStencilComponent(VkFormat format){
+	return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;
 }
