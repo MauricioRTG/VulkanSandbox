@@ -769,6 +769,10 @@ void VKApplication::createDepthResources(){
 	depthImageView = createImageView(depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
 
 	//Note: We don't need to map it or copy another image to it, because we're going to clear it at the start of the render pass like the color attachment.
+
+	// Explicitly transitioning the depth image
+	//We don't need to explicitly transition the layout of the image to a depth attachment because we'll take care of this in the render pass. However, for completeness I'll still describe the process in this section. You may skip it if you like.
+	transitionImageLayout(depthImage, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 }
 
 void VKApplication::createTextureImage(){
@@ -777,7 +781,7 @@ void VKApplication::createTextureImage(){
 	// Load image
 	int texWidth, texHeight, texChannels;
 	//The STBI_rgb_alpha value forces the image to be loaded with an alpha channel, even if it doesn't have one
-	stbi_uc* pixels = stbi_load("textures/lion-1.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+	stbi_uc* pixels = stbi_load("textures/fox.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
 	//The pixels are laid out row by row with 4 bytes per pixel in the case of STBI_rgb_alpha for a total of texWidth * texHeight * 4 values.
 	VkDeviceSize imageSize = texWidth * texHeight * 4;
 
@@ -1869,8 +1873,19 @@ void VKApplication::transitionImageLayout(VkImage image, VkFormat format, VkImag
 	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	barrier.image = image;
 	//The image and subresourceRange specify the image that is affected and the specific part of the image.
+	// Choose right subresource aspect (depth or color) 
+	if (newLayout == VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL) {
+		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+
+		//Include stencil bit if format supports it
+		if (hasStencilComponent(format)) {
+			barrier.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+		}
+	}
+	else {
+		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	}
 	//Our image is not an array and does not have mipmapping levels, so only one level and layer are specified.
-	barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	barrier.subresourceRange.baseMipLevel = 0;
 	barrier.subresourceRange.levelCount = 1;
 	barrier.subresourceRange.baseArrayLayer = 0;
@@ -1884,8 +1899,9 @@ void VKApplication::transitionImageLayout(VkImage image, VkFormat format, VkImag
 	VkPipelineStageFlags destinationStage;
 
 	if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-		barrier.srcAccessMask = 0; //Undefined doesn't matter (Don't need to wait on anything). set srcAccessMask to 0 if you ever needed a VK_ACCESS_HOST_WRITE_BIT dependency in a layout transition. Command buffer submission results in implicit VK_ACCESS_HOST_WRITE_BIT synchronization at the beginning. 
-		barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		//Form undefined layout to transfer dst layout
+		barrier.srcAccessMask = 0; // (Operation to wait on) Undefined doesn't matter (Don't need to wait on anything). set srcAccessMask to 0 if you ever needed a VK_ACCESS_HOST_WRITE_BIT dependency in a layout transition. Command buffer submission results in implicit VK_ACCESS_HOST_WRITE_BIT synchronization at the beginning. 
+		barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT; //(operation to do after waiting to the previous srcAccessMask operation to complete) Transfer write operation, in this case it doesn't wait for any operation becuase srcAccessMask is 0
 
 		sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;// Since the writes don't have to wait on anything, you may specify an empty access mask and the earliest possible pipeline stage VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT
 		destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;//transfer writes must occur in the pipeline transfer stage (is not a real stage within the graphics and compute pipelines. It is more of a pseudo-stage where transfers happen)
@@ -1897,6 +1913,15 @@ void VKApplication::transitionImageLayout(VkImage image, VkFormat format, VkImag
 
 		sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT; 
 		destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	}
+	else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+		//Depth image layout transition
+		//The depth buffer will be read from to perform depth tests to see if a fragment is visible, and will be written to when a new fragment is drawn.
+		barrier.srcAccessMask = 0; 
+		barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+		sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;//You should pick the earliest pipeline stage that matches the specified operations, so that it is ready for usage as depth attachment when it needs to be.
+		destinationStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;//Read happens at this stage
 	}
 	else {
 		throw std::invalid_argument("unsupported layout transition!");
