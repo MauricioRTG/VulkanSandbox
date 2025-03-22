@@ -46,6 +46,8 @@ const bool enableValidationLayers = true;
 struct Vertex {
 	glm::vec2 pos;
 	glm::vec3 color;
+	//Important aspect for texture mapping, the actual coordinates for each vertex (texture coordinates). The coordinates determine how the image is actually mapped to the geometry.
+	glm::vec2 texCoord;
 
 	static VkVertexInputBindingDescription getBindingDescription() {
 		//All of our per-vertex data is packed together in one array, so we're only going to have one binding. 
@@ -59,8 +61,8 @@ struct Vertex {
 		return bindingDescription;
 	}
 
-	static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescription() {
-		std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+	static std::array<VkVertexInputAttributeDescription, 3> getAttributeDescription() {
+		std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
 		
 		//Position
 		//The binding is loading one Vertex at a time and the position attribute (pos) is at an offset of 0 bytes from the beginning of this struct
@@ -84,6 +86,12 @@ struct Vertex {
 		attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
 		attributeDescriptions[1].offset = offsetof(Vertex, color);
 
+		//Texture Coordinates
+		attributeDescriptions[2].binding = 0;
+		attributeDescriptions[2].location = 2;
+		attributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
+		attributeDescriptions[2].offset = offsetof(Vertex, texCoord);
+
 		return attributeDescriptions;
 	}
 };
@@ -94,7 +102,7 @@ struct Vertex {
 * Vulkan expects the data in your structure to be aligned in memory in a specific way, for example:
 * - Scalars have to be aligned by N (= 4 bytes given 32 bit floats).
 * - A vec2 must be aligned by 2N (= 8 bytes) (two floats of 4 bytes)
-* - A vec3 (3 flosts) or vec4 (4 floats which is 16 bytes) must be aligned by 4N (= 16 bytes)
+* - A vec3 (3 floats) or vec4 (4 floats which is 16 bytes) must be aligned by 4N (= 16 bytes)
 * - A nested structure must be aligned by the base alignment of its members rounded up to a multiple of 16.
 * - A mat4 matrix must have the same alignment as a vec4.
 * 
@@ -123,11 +131,13 @@ struct UniformBufferObject {
 
 //Array of vertex data
 //We're using exactly the same position and color values as before, but now they're combined into one array of vertices. This is known as interleaving vertex attributes.
+//Texture Coordinates:  fill the square with the texture by using coordinates from 0, 0 in the top-left corner to 1, 1 in the bottom-right corner.
+//Experiment: Try using coordinates below 0 or above 1 to see the addressing modes in action (repeat, clamp to edge, etc.
 const std::vector<Vertex> vertices = {
-	{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-	{{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},
-	{{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}},
-	{{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}}
+	{{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+	{{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+	{{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+	{{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}}
 };
 
 //Array of index data
