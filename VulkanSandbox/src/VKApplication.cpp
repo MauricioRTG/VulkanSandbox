@@ -40,9 +40,9 @@ void VKApplication::initVulkan() {
 	createRenderPass();
 	createDescriptorSetLayout();
 	createGraphicsPipeline();
-	createFramebuffers();
 	createCommandPool();
 	createDepthResources();
+	createFramebuffers();
 	createTextureImage();
 	createTextureImageView();
 	createTextureSampler();
@@ -613,6 +613,21 @@ void VKApplication::createGraphicsPipeline(){
 	multisampling.alphaToCoverageEnable = VK_FALSE; // Optional
 	multisampling.alphaToOneEnable = VK_FALSE; // Optional
 
+	//Depth Stencil
+	VkPipelineDepthStencilStateCreateInfo depthStencil{};
+	depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+	depthStencil.depthTestEnable = VK_TRUE; //specifies if the depth of new fragments should be compared to the depth buffer to see if they should be discarded.
+	depthStencil.depthWriteEnable = VK_TRUE;//specifies if the new depth of fragments that pass the depth test should actually be written to the depth buffer.
+	depthStencil.depthCompareOp = VK_COMPARE_OP_LESS; //pecifies the comparison that is performed to keep or discard fragments. We're sticking to the convention of lower depth = closer, so the depth of new fragments should be less.
+	depthStencil.depthBoundsTestEnable = VK_FALSE;//The depthBoundsTestEnable, minDepthBounds and maxDepthBounds fields are used for the optional depth bound test. Basically, this allows you to only keep fragments that fall within the specified depth range. We won't be using this functionality.
+	depthStencil.minDepthBounds = 0.0f; // Optional
+	depthStencil.maxDepthBounds = 1.0f; // Optional
+	//The last three fields configure stencil buffer operations
+	//If you want to use these operations, then you will have to make sure that the format of the depth/stencil image contains a stencil component.
+	depthStencil.stencilTestEnable = VK_FALSE;
+	depthStencil.front = {}; // Optional
+	depthStencil.back = {}; // Optional
+
 	//Color blending
 	//After a fragment shader has returned a color, it needs to be combined with the color that is already in the framebuffer. This transformation is known as color blending and there are two ways to do it:
 	//		Mix the old and new value to produce a final color
@@ -705,7 +720,7 @@ void VKApplication::createGraphicsPipeline(){
 	pipelineInfo.pViewportState = &viewportState;
 	pipelineInfo.pRasterizationState = &rasterizer;
 	pipelineInfo.pMultisampleState = &multisampling;
-	pipelineInfo.pDepthStencilState = nullptr;
+	pipelineInfo.pDepthStencilState = &depthStencil;
 	pipelineInfo.pColorBlendState = &colorBlending;
 	pipelineInfo.pDynamicState = &dynamicState;
 	//Pipeline layout
@@ -734,15 +749,17 @@ void VKApplication::createFramebuffers(){
 
 	//Iterate thorugh the image views and create framebuffers
 	for (size_t i = 0; i < swapChainImageViews.size(); i++) {
-		VkImageView attachments[] = {
-			swapChainImageViews[i]
+		//The color attachment differs for every swap chain image, but the same depth image can be used by all of them because only a single subpass is running at the same time due to our semaphores.
+		std::array<VkImageView, 2> attachments = {
+			swapChainImageViews[i],
+			depthImageView
 		};
 
 		VkFramebufferCreateInfo framebufferInfo{};
 		framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
 		framebufferInfo.renderPass = renderPass; //You can only use a framebuffer with the render passes that it is compatible with, which roughly means that they use the same number and type of attachments.
-		framebufferInfo.attachmentCount = 1;
-		framebufferInfo.pAttachments = attachments; //specify the VkImageView objects that should be bound to the respective attachment descriptions in the render pass pAttachment array
+		framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+		framebufferInfo.pAttachments = attachments.data(); //specify the VkImageView objects that should be bound to the respective attachment descriptions in the render pass pAttachment array
 		framebufferInfo.width = swapChainExtent.width;
 		framebufferInfo.height = swapChainExtent.height;
 		framebufferInfo.layers = 1; //refers to the number of layers in image arrays. Our swap chain images are single images, so the number of layers is 1
@@ -1434,10 +1451,17 @@ void VKApplication::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
 	// The pixels outside this region will have undefined values. It should match the size of the attachments for best performance.
 	renderPassInfo.renderArea.offset = { 0, 0 }; 
 	renderPassInfo.renderArea.extent = swapChainExtent;
-	// define the clear values to use for VK_ATTACHMENT_LOAD_OP_CLEAR, which we used as load operation for the color attachment.
-	VkClearValue clearColor = { {{0.0f, 0.0f, 0.0f, 1.0f}} }; //Black with 100% opacity.
-	renderPassInfo.clearValueCount = 1;
-	renderPassInfo.pClearValues = &clearColor;
+	// define the clear values to use for VK_ATTACHMENT_LOAD_OP_CLEAR, which we used as load operation for the color and depth attachment.
+	std::array<VkClearValue, 2> clearValues{};
+	clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}}; //Black with 100% opacity.
+	//The range of depths in the depth buffer is 0.0 to 1.0 in Vulkan, where 1.0 lies at the far view plane and 0.0 at the near view plane. 
+	//he initial value at each point in the depth buffer should be the furthest possible depth, which is 1.0.
+	clearValues[1].depthStencil = { 1.0f, 0 };
+
+	//Note: Note that the order of clearValues should be identical to the order of your attachments.
+
+	renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+	renderPassInfo.pClearValues = clearValues.data();
 
 	// Command to begin render pass
 	
@@ -1630,10 +1654,16 @@ void VKApplication::recreateSwapChain(){
 
 	createSwapChain();
 	createImageViews();//The image views need to be recreated because they are based directly on the swap chain images
+	createDepthResources();
 	createFramebuffers();//the framebuffers directly depend on the swap chain images
 }
 
 void VKApplication::cleanupSwapChain(){
+	//Depth buffering clean up
+	vkDestroyImageView(logicalDevice, depthImageView, nullptr);
+	vkDestroyImage(logicalDevice, depthImage, nullptr);
+	vkFreeMemory(logicalDevice, depthImageMemory, nullptr);
+
 	for (size_t i = 0; i < swapChainFramebuffers.size(); i++) {
 		vkDestroyFramebuffer(logicalDevice, swapChainFramebuffers[i], nullptr);
 	}
@@ -1901,7 +1931,7 @@ void VKApplication::transitionImageLayout(VkImage image, VkFormat format, VkImag
 	barrier.image = image;
 	//The image and subresourceRange specify the image that is affected and the specific part of the image.
 	// Choose right subresource aspect (depth or color) 
-	if (newLayout == VK_IMAGE_LAYOUT_STENCIL_ATTACHMENT_OPTIMAL) {
+	if (newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
 		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
 
 		//Include stencil bit if format supports it
@@ -2062,18 +2092,19 @@ VkFormat VKApplication::findSupportedFormat(const std::vector<VkFormat>& candida
 		if (tiling == VK_IMAGE_TILING_LINEAR && (props.linearTilingFeatures & features) == features) {
 			return format;
 		}
-		else if (tiling == VK_IMAGE_TILING_OPTIMAL && (props.linearTilingFeatures & features) == features) {
+		else if (tiling == VK_IMAGE_TILING_OPTIMAL && (props.optimalTilingFeatures & features) == features) {
 			return format;
 		}
 	}
 	
-	throw std::runtime_error("failed to find supported format!");
+	throw std::runtime_error("Failed to find supported format!");
 }
 
 VkFormat VKApplication::findDepthFormat(){
 	//Find supported format for depth
+	//All of these candidate formats contain a depth component, but the latter two also contain a stencil component.
 	return findSupportedFormat(
-		{ VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT}, //All of these candidate formats contain a depth component, but the latter two also contain a stencil component.
+		{ VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT},
 		VK_IMAGE_TILING_OPTIMAL,
 		VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT
 	);
