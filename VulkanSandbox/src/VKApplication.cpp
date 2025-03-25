@@ -8,6 +8,9 @@
 //Load an image library
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
+//Load a model
+#define TINYOBJLOADER_IMPLEMENTATION
+#include <tiny_obj_loader.h>
 
 void VKApplication::run() {
 	initWindows();
@@ -46,6 +49,7 @@ void VKApplication::initVulkan() {
 	createTextureImage();
 	createTextureImageView();
 	createTextureSampler();
+	loadModel();
 	createVertexBuffer();
 	createIndexBuffer();
 	createUniformBuffers();
@@ -825,7 +829,7 @@ void VKApplication::createTextureImage(){
 	// Load image
 	int texWidth, texHeight, texChannels;
 	//The STBI_rgb_alpha value forces the image to be loaded with an alpha channel, even if it doesn't have one
-	stbi_uc* pixels = stbi_load("textures/fox.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+	stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
 	//The pixels are laid out row by row with 4 bytes per pixel in the case of STBI_rgb_alpha for a total of texWidth * texHeight * 4 values.
 	VkDeviceSize imageSize = texWidth * texHeight * 4;
 
@@ -928,6 +932,58 @@ void VKApplication::createTextureSampler(){
 	// It can be applied to any image you want, whether it is 1D, 2D or 3D.
 	if (vkCreateSampler(logicalDevice, &samplerInfo, nullptr, &textureSampler) != VK_SUCCESS) {
 		throw std::runtime_error("Failed to create texture sampler!");
+	}
+}
+
+void VKApplication::loadModel(){
+	//An OBJ file consists of positions, normals, texture coordinates and faces.
+	//Faces consist of an arbitrary amount of vertices, where each vertex refers to a position, normal and/or texture coordinate by index
+	//This makes it possible to not just reuse entire vertices, but also individual attributes.
+
+	tinyobj::attrib_t attrib;// holds all of the positions, normals and texture coordinates in its attrib.vertices, attrib.normals and attrib.texcoords vectors
+	std::vector<tinyobj::shape_t> shapes;// contains all of the separate objects and their faces. Each face consists of an array of vertices, and each vertex contains the indices of the position, normal and texture coordinate attributes.
+	std::vector<tinyobj::material_t> materials;//The err string contains errors and the warn string contains warnings that occurred while loading the file, like a missing material definition.
+	std::string warning, error;
+
+	if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warning, &error, MODEL_PATH.c_str())) {
+		throw std::runtime_error(warning + error);
+	}
+
+	//Note: As mentioned above, faces in OBJ files can actually contain an arbitrary number of vertices, whereas our application can only render triangles.
+	//Luckily the LoadObj has an optional parameter to automatically triangulate such faces, which is enabled by default.
+
+	//We're going to combine all of the faces in the file into a single model, so just iterate over all of the shapes
+	//The triangulation feature has already made sure that there are three vertices per face, so we can now directly iterate over the vertices and dump them straight into our vertices vector
+	for (const auto& shape : shapes) {
+		for (const auto& index : shape.mesh.indices) {
+			//For simplicity, we will assume that every vertex is unique for now, hence the simple auto-increment indices.
+			//The index variable is of type tinyobj::index_t, which contains the vertex_index, normal_index and texcoord_index members. 
+			// We need to use these indices to look up the actual vertex attributes in the attrib arrays
+			Vertex vertex{};
+			//attrib.vertices array is an array of float values instead of something like glm::vec3 (to take into account the 3 values needed for x, y, z), so you need to multiply the index by 3
+			//Multiplication (*) and division (/) have higher precedence than addition (+) and subtraction (-). Multiplication is performed first, followed by addition (evaluated from left to right when multiple multiplications are present)
+			vertex.pos = {
+				attrib.vertices[3 * index.vertex_index + 0], // X
+				attrib.vertices[3 * index.vertex_index + 1], // Y
+				attrib.vertices[3 * index.vertex_index + 2] // Z
+			};
+
+			//There are two texture coordinate components per entry (U and V)
+			vertex.texCoord = {
+				attrib.texcoords[2 * index.texcoord_index + 0],//U
+				attrib.texcoords[2 * index.texcoord_index + 1] //V
+			};
+
+			// The OBJ format assumes a coordinate system where a vertical coordinate of 0 means the bottom of the image, however we've uploaded our image into Vulkan in a top to bottom orientation where 0 means the top of the image
+			//Solve this by flipping the vertical component of the texture coordinates:
+			vertex.texCoord = {
+				attrib.texcoords[2 * index.texcoord_index + 0], //U
+				1.0f - attrib.texcoords[2 * index.texcoord_index + 1]// Flip V
+			};
+
+			vertices.push_back(vertex);
+			indices.push_back(indices.size());
+		}
 	}
 }
 
@@ -1497,7 +1553,7 @@ void VKApplication::recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t 
 	vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
 
 	// Bind index buffer to command buffer
-	vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+	vkCmdBindIndexBuffer(commandBuffer, indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
 	//Bind the right descriptor set for each frame to the descriptors in the shader
 	vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout, 0, 1, &descriptorSets[currentFrame], 0, nullptr);

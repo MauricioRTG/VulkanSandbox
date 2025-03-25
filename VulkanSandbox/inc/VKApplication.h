@@ -26,8 +26,12 @@
 //We need to configure it to use the Vulkan range of 0.0 to 1.0 using:
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
+
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
+
+const std::string MODEL_PATH = "models/viking_room.obj";
+const std::string TEXTURE_PATH = "textures/viking_room.png";
 
 //Allow multiple frames to be in-flight at once, that is to say, allow the rendering of one frame to not interfere with the recording of the next.
 // - Thus, we need multiple command buffers, semaphores, and fences. 
@@ -138,7 +142,7 @@ struct UniformBufferObject {
 //We're using exactly the same position and color values as before, but now they're combined into one array of vertices. This is known as interleaving vertex attributes.
 //Texture Coordinates:  fill the square with the texture by using coordinates from 0, 0 in the top-left corner to 1, 1 in the bottom-right corner.
 //Experiment texCoord: Try using coordinates below 0 or above 1 to see the addressing modes in action (repeat, clamp to edge, etc.
-const std::vector<Vertex> vertices = {
+/*const std::vector<Vertex> vertices = {
 	//Top image
 	//Position, Colo, texCoord
 	{{-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
@@ -150,15 +154,15 @@ const std::vector<Vertex> vertices = {
 	{{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
 	{{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
 	{{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
-};
+};*/
 
 //Array of index data
 //It is possible to use either uint16_t or uint32_t for your index buffer depending on the number of entries in vertices
 //uint16_t: 65535 unique vertices
-const std::vector<uint16_t> indices = {
+/*const std::vector<uint16_t> indices = {
 	0, 1, 2, 2, 3, 0,
 	4, 5, 6, 6, 7, 4
-};
+};*/
 
 //Stores indices for different queue types
 struct QueueFamilyIndices {
@@ -257,6 +261,10 @@ private:
 
 	//To use the right objects every frame, we need to keep track of the current frame.
 	uint32_t currentFrame = 0;
+
+	//We are using tinyobjloader to load vertices and index to the vector
+	std::vector<Vertex> vertices;
+	std::vector<uint32_t> indices;
 
 	//Vertex Buffer Handle
 	VkBuffer vertexBuffer;
@@ -369,6 +377,8 @@ private:
 	void createTextureImageView();
 
 	void createTextureSampler();
+
+	void loadModel();
 
 	void createVertexBuffer();
 
