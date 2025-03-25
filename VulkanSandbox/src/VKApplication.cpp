@@ -5,6 +5,7 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <chrono>
+#include <unordered_map>
 //Load an image library
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
@@ -952,11 +953,12 @@ void VKApplication::loadModel(){
 	//Note: As mentioned above, faces in OBJ files can actually contain an arbitrary number of vertices, whereas our application can only render triangles.
 	//Luckily the LoadObj has an optional parameter to automatically triangulate such faces, which is enabled by default.
 
+	std::unordered_map<Vertex, uint32_t> uniqueVertices{};
+
 	//We're going to combine all of the faces in the file into a single model, so just iterate over all of the shapes
 	//The triangulation feature has already made sure that there are three vertices per face, so we can now directly iterate over the vertices and dump them straight into our vertices vector
 	for (const auto& shape : shapes) {
 		for (const auto& index : shape.mesh.indices) {
-			//For simplicity, we will assume that every vertex is unique for now, hence the simple auto-increment indices.
 			//The index variable is of type tinyobj::index_t, which contains the vertex_index, normal_index and texcoord_index members. 
 			// We need to use these indices to look up the actual vertex attributes in the attrib arrays
 			Vertex vertex{};
@@ -981,8 +983,14 @@ void VKApplication::loadModel(){
 				1.0f - attrib.texcoords[2 * index.texcoord_index + 1]// Flip V
 			};
 
-			vertices.push_back(vertex);
-			indices.push_back(indices.size());
+			//Every time we read a vertex from the OBJ file, we check if we've already seen a vertex with the exact same position and texture coordinates before
+			//f not, we add it to vertices and store its index in the uniqueVertices container.
+			if (uniqueVertices.count(vertex) == 0) { //Return 0 if is not in the set
+				uniqueVertices[vertex] = static_cast<uint32_t>(vertices.size());
+				vertices.push_back(vertex);
+			}
+			//After that we add the index of the new vertex to indices. If we've seen the exact same vertex before, then we look up its index in uniqueVertices and store that index in indices.
+			indices.push_back(uniqueVertices[vertex]);
 		}
 	}
 }

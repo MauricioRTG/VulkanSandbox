@@ -26,6 +26,9 @@
 //We need to configure it to use the Vulkan range of 0.0 to 1.0 using:
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/hash.hpp>
+
 
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
@@ -103,7 +106,44 @@ struct Vertex {
 
 		return attributeDescriptions;
 	}
+
+	//Because we are using a user-defined type like Vertex struct as key in a hash table requires us to implement two functions:
+	//- Equlity test ==
+	//- Hash calculation (because we used as a key)
+
+	bool operator==(const Vertex& other) const {
+		return pos == other.pos && color == other.color && texCoord == other.texCoord;
+	}
 };
+
+// combining the fields of a struct to create a decent quality hash function
+//^ (XOR): Combines two values in a way that changes bits unpredictably.
+//<< 1 (Left shift): Moves bits to the left, introducing variation.
+//>> 1 (Right shift): Prevents overflow and redistributes bits.
+//nsures that the hash is distributed well across different inputs, reducing collisions.
+//Steps:
+//1. Hashing individual components
+//2. Combining them uniquely
+//When you write:
+//std::unordered_set<Vertex> vertexSet;
+//vertexSet.insert(myVertex);
+// Internally, this happens:
+//1. The unordered set calls: std::hash<Vertex>{}(myVertex);
+//- This calls our overridden operator()() to generate a hash value.
+//2. The hash table uses this value to determine a bucket for storage.
+//When searching for myVertex, the unordered set:
+//Hashes it again.
+//Looks up the bucket based on the hash.
+//Checks for equality with existing entries (using operator== if defined).
+namespace std {
+	template<> struct hash<Vertex> {
+		size_t operator()(Vertex const& vertex) const {
+			return ((hash<glm::vec3>()(vertex.pos) ^
+				(hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^
+				(hash<glm::vec2>()(vertex.texCoord) << 1);
+		}
+	};
+}
 
 /*
 * Alignment Requirments
