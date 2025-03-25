@@ -33,8 +33,8 @@
 const uint32_t WIDTH = 800;
 const uint32_t HEIGHT = 600;
 
-const std::string MODEL_PATH = "models/viking_room.obj";
-const std::string TEXTURE_PATH = "textures/viking_room.png";
+const std::string MODEL_PATH = "models/robot.obj";
+const std::string TEXTURE_PATH = "textures/robot.jpg";
 
 //Allow multiple frames to be in-flight at once, that is to say, allow the rendering of one frame to not interfere with the recording of the next.
 // - Thus, we need multiple command buffers, semaphores, and fences. 

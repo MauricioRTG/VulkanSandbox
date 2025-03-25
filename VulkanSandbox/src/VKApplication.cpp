@@ -1844,14 +1844,21 @@ void VKApplication::updateUniformBuffer(uint32_t currentImage){
 	//The glm::rotate function takes an existing transformation, rotation angle and rotation axis as parameters.
 	//The glm::mat4(1.0f) constructor returns an identity matrix. 
 	//Using a rotation angle of time * glm::radians(90.0f) accomplishes the purpose of rotation 90 degrees per second.
-	ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+
+	// First, rotate the model to be vertical
+	glm::mat4 model = glm::rotate(glm::mat4(1.0f), glm::radians(90.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+
+	// Then, apply continuous yaw rotation
+	model = glm::rotate(model, time * glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+
+	ubo.model = model;
 	
 	// View: from world space to view space (camera view)
 	//View/Camera looks at at the geometry from above at a 45 degree angle
 	// First parameter: positoin of the camera in world space
 	// Second parameter: Target position, the positon the camera is looking (in this case the world origin)
 	// Third parameter: Up vector, defines which direction is condered "up" in the world. In this case, (0,0,1) means the positive Z-axis is up.
-	ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), glm::vec3(0.0, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+	ubo.view = glm::lookAt(glm::vec3(18.0f, 18.0f, 18.0f), glm::vec3(0.0f, 0.0f, 6.0f), glm::vec3(0.0f, 0.0f, 1.0f));
 
 	// Projection: from view space to clip-space
 	//The projection matrix then converts coordinates within this specified range to normalized device coordinates (-1.0, 1.0) (not directly, a step called Perspective Division sits in between). 
@@ -1864,7 +1871,7 @@ void VKApplication::updateUniformBuffer(uint32_t currentImage){
 	//Third and fourth parameter: sets the near and far plane of the frustum (All the vertices between the near and far plane and inside the frustum will be rendered0
 	//We usually set the near distance to 0.1 and the far distance to 100.0. 
 	//The rectangle has changed into a square because the projection matrix now corrects for aspect ratio takes care of screen resizing.
-	ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 10.0f);
+	ubo.proj = glm::perspective(glm::radians(45.0f), swapChainExtent.width / (float)swapChainExtent.height, 0.1f, 100.0f);
 
 	//GLM was originally designed for OpenGL, where the Y coordinate of the clip coordinates is inverted. The easiest way to compensate for that is to flip the sign on the scaling factor of the Y axis in the projection matrix.
 	ubo.proj[1][1] = ubo.proj[1][1] * -1;
