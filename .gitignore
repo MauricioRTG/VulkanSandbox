@@ -199,7 +199,7 @@ FakesAssemblies/
 .vs/
 
 # Don't ignore 3d models in obj format
-!data/models/*.obj
+!VulkanSandbox/models/*.obj
 !data/models/lowpoly/*.obj
 !data/models/voyager/*.obj
 
