@@ -442,7 +442,7 @@ private:
 
 	bool isDeviceSuitable(VkPhysicalDevice device);
 
-	int rateDeviceSuitability(VkPhysicalDevice device);
+	int ratePhysicalDeviceSuitability(VkPhysicalDevice device);
 
 	QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;
 

@@ -206,7 +206,7 @@ void VKApplication::pickPhysicalDevice(){
 
 	//Select a physical device
 	for (const auto& device : physicalDevices) {
-		int score = rateDeviceSuitability(device);
+		int score = ratePhysicalDeviceSuitability(device);
 		candidates.insert(std::make_pair(score, device));
 	}
 
@@ -1324,7 +1324,7 @@ bool VKApplication::isDeviceSuitable(VkPhysicalDevice device){
 	return indices.isComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy;
 }
 
-int VKApplication::rateDeviceSuitability(VkPhysicalDevice device){
+int VKApplication::ratePhysicalDeviceSuitability(VkPhysicalDevice device){
 
 	VkPhysicalDeviceProperties deviceProperties;
 	vkGetPhysicalDeviceProperties(device, &deviceProperties);
@@ -1333,9 +1333,10 @@ int VKApplication::rateDeviceSuitability(VkPhysicalDevice device){
 	
 	int score = 0;
 
+	//TODO: Select discrete gpu
 	//Discrete GPUs have a significant performance advantage
-	if (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
-		score += 1000;
+	if (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU) {
+		score += 40000; 
 	}
 
 	//Maximum possible size of textures affects graphics quality
