@@ -1,6 +1,6 @@
 
 # Vulkan Sandbox
-Vulkan Sandbox is vulkan application that i used to learn the vulkan API. With the purpose to be a base for a game engine and to test rendering techniques.
+Vulkan Sandbox is a vulkan application i use to learn the vulkan API. The purpose of this application is to be a base for a game engine and to test rendering techniques.
 
 ## TODO
 
