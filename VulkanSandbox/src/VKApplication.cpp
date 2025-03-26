@@ -6,6 +6,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <chrono>
 #include <unordered_map>
+#include <map>
 //Load an image library
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
@@ -196,8 +197,28 @@ void VKApplication::pickPhysicalDevice(){
 	std::vector<VkPhysicalDevice> physicalDevices(deviceCount);
 	vkEnumeratePhysicalDevices(instance, &deviceCount, physicalDevices.data());
 
+	//You might use a multimap instead of a map when you need to associate multiple values with a single key. This is useful when representing a one-to-many relationship.
+	// Map: In a map, each key is unique and maps to a single value. This is useful for building indexes or references, and for avoiding duplicate data. 
+	//Multimap: In a multimap, multiple values can be associated with a single key. This is useful when you need to store and retrieve data that has multiple values for the same key. 
+
+	//Use an ordered map to automatically sort candidates by increasing score
+	std::multimap<int, VkPhysicalDevice> candidates;
+
 	//Select a physical device
 	for (const auto& device : physicalDevices) {
+		int score = rateDeviceSuitability(device);
+		candidates.insert(std::make_pair(score, device));
+	}
+
+	// Check if the best candidate is suitable at all
+	if (candidates.rbegin()->first > 0) {
+		physicalDevice = candidates.rbegin()->second;
+	}
+	else {
+		throw std::runtime_error("Failed to find a suitable GPU!");
+	}
+
+	/*for (const VkPhysicalDevice& device : physicalDevices) {
 		if (isDeviceSuitable(device)) {
 			physicalDevice = device;
 			break;
@@ -206,7 +227,7 @@ void VKApplication::pickPhysicalDevice(){
 
 	if (physicalDevice == VK_NULL_HANDLE) {
 		throw std::runtime_error("failed to find a suitable GPU!");
-	}
+	}*/
 
 }
 
@@ -320,8 +341,6 @@ void VKApplication::createSwapChain(){
 	}
 	else {
 		createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE; //An image is owned by one queue family at a time and ownership must be explicitly transferred before using it in another queue family. This option offers the best performance.
-		createInfo.queueFamilyIndexCount = 0; //optional
-		createInfo.pQueueFamilyIndices = nullptr;
 	}
 
 	//We can specify that a certain transform should be applied to images in the swap chain if it is supported (supportedTransforms in capabilities), like a 90 degree clockwise rotation or horizontal flip. To specify that you do not want any transformation, simply specify the current transformation.
@@ -331,8 +350,8 @@ void VKApplication::createSwapChain(){
 	createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
 	createInfo.presentMode = presentMode;
 	createInfo.clipped = VK_TRUE; //If the clipped member is set to VK_TRUE then that means that we don't care about the color of pixels that are obscured, for example because another window is in front of them. Unless you really need to be able to read these pixels back and get predictable results, you'll get the best performance by enabling clipping.
-	createInfo.oldSwapchain = VK_NULL_HANDLE; //With Vulkan it's possible that your swap chain becomes invalid or unoptimized while your application is running, for example because the window was resized. In that case the swap chain actually needs to be recreated from scratch and a reference to the old one must be specified in this field. For now we assume that we'll only ever create onw swap chaim
-
+	//createInfo.oldSwapchain = VK_NULL_HANDLE; //With Vulkan it's possible that your swap chain becomes invalid or unoptimized while your application is running, for example because the window was resized. In that case the swap chain actually needs to be recreated from scratch and a reference to the old one must be specified in this field. For now we assume that we'll only ever create onw swap chaim
+	
 	//Create Swapchain 
 	if (vkCreateSwapchainKHR(logicalDevice, &createInfo, nullptr, &swapChain) != VK_SUCCESS) {
 		throw std::runtime_error("Failed to create swap chain!");
@@ -1305,6 +1324,57 @@ bool VKApplication::isDeviceSuitable(VkPhysicalDevice device){
 	return indices.isComplete() && extensionsSupported && swapChainAdequate && supportedFeatures.samplerAnisotropy;
 }
 
+int VKApplication::rateDeviceSuitability(VkPhysicalDevice device){
+
+	VkPhysicalDeviceProperties deviceProperties;
+	vkGetPhysicalDeviceProperties(device, &deviceProperties);
+	VkPhysicalDeviceFeatures deviceFeatures;
+	vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
+	
+	int score = 0;
+
+	//Discrete GPUs have a significant performance advantage
+	if (deviceProperties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU) {
+		score += 1000;
+	}
+
+	//Maximum possible size of textures affects graphics quality
+	score += deviceProperties.limits.maxImageDimension2D;
+
+	// Application can't function without geometry shaders
+	if (!deviceFeatures.geometryShader) {
+		return 0;
+	}
+
+	if (deviceFeatures.samplerAnisotropy) {
+		score += 1000;
+	}
+
+	//Select based on having the queue families tyes that we want (that support Preentation and Graphics)
+	QueueFamilyIndices indices = findQueueFamilies(device);
+
+	bool extensionsSupported = checkDeviceExtensionSupport(device);
+	//Check for adequate swapChain support in surface with correct formats and presentation modes
+	bool swapChainAdequate = false;
+	if (extensionsSupported) {
+		score += 1000;
+		SwapChainSupportDetails swapChainSupport = querySwapChainSupport(device);
+		swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentModes.empty();
+	}
+
+	if (indices.isComplete())
+	{
+		score += 1500;
+	}
+
+	if (swapChainAdequate)
+	{
+		score += 1000;
+	}
+
+	return score;
+}
+
 QueueFamilyIndices VKApplication::findQueueFamilies(VkPhysicalDevice device) const {
 	QueueFamilyIndices indices;
 	//Assign index to queue families that could be found
@@ -1376,7 +1446,7 @@ SwapChainSupportDetails VKApplication::querySwapChainSupport(VkPhysicalDevice de
 	uint32_t presentModeCount;
 	vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount, nullptr);
 
-	if (presentModeCount) {
+	if (presentModeCount != 0) {
 		details.presentModes.resize(presentModeCount);
 		vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModeCount, details.presentModes.data());
 	}
@@ -1403,7 +1473,7 @@ VkPresentModeKHR VKApplication::chooseSwapPresentMode(const std::vector<VkPresen
 	// On mobile devices, where energy usage is more important, you will probably want to use VK_PRESENT_MODE_FIFO_KHR instead.
 	for (const auto& availablePresentMode : availablePresentModes) {
 		if (availablePresentMode == VK_PRESENT_MODE_MAILBOX_KHR) {
-			availablePresentMode;
+			return availablePresentMode;
 		}
 	}
 	return VK_PRESENT_MODE_FIFO_KHR;

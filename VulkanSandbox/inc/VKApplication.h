@@ -442,6 +442,8 @@ private:
 
 	bool isDeviceSuitable(VkPhysicalDevice device);
 
+	int rateDeviceSuitability(VkPhysicalDevice device);
+
 	QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device) const;
 
 	//SwapChain
