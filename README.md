@@ -37,7 +37,7 @@ https://github.com/MauricioRTG/VulkanSandbox.git
 3. Select the desired configuration and platform (relased, x64)
 4. Build project (press green play button)
    
-# Vulkan References
+## Vulkan References
 
 Great credit goes to [Vulkan Tutorial](https://vulkan-tutorial.com/) by Alexander Overvoorde. 
 
