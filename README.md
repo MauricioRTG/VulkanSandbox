@@ -19,6 +19,7 @@ Prerequisites:
 * [Git for Windows](https://github.com/git-for-windows/git/releases)
 * [Vulkan SDK](https://vulkan.lunarg.com/) 
 * A [Vulkan capable GPU](https://vulkan.gpuinfo.org/listdevices.php) with the appropriate drivers installed
+* [GLFW](https://www.glfw.org/) to create and manage windows, and input.
 * [GLM](https://github.com/g-truc/glm) a C++ mathematics library 
 * [tinyobjloader](https://github.com/tinyobjloader/tinyobjloader/tree/v1.0.6) to load 3D models
 * [stb_image](https://github.com/nothings/stb/blob/master/stb_image.h) to load textures
