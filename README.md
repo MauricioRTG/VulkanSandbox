@@ -40,5 +40,5 @@ https://github.com/MauricioRTG/VulkanSandbox.git
    
 ## Vulkan References
 
-Great credit goes to [Vulkan Tutorial](https://vulkan-tutorial.com/) by Alexander Overvoorde. 
-
+* Great credit goes to [Vulkan Tutorial](https://vulkan-tutorial.com/) by Alexander Overvoorde. 
+* "Robo_OBJ_pose4" (https://skfb.ly/m4ifca) by Artem Shupa-Dubrova is licensed under Creative Commons Attribution-NoDerivs (http://creativecommons.org/licenses/by-nd/4.0/).
